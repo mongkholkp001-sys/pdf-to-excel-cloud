@@ -1,0 +1,665 @@
+{% extends "base.html" %}
+
+{% block title %}จัดการผู้ใช้งาน & สิทธิ์การเข้าถึง{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h3 class="fw-bold mb-1">จัดการผู้ใช้งาน & สิทธิ์การเข้าถึง</h3>
+        <p class="text-muted mb-0">ตรวจสอบและกดอนุมัติผู้สมัครใหม่ กำหนดแพ็กเกจ (เช่า/ซื้อขาด) และจัดการระงับสิทธิ์การใช้งาน</p>
+    </div>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addUserModal">
+        <i class="bi bi-person-plus-fill me-1"></i> เพิ่มผู้ใช้งานใหม่
+    </button>
+</div>
+
+<!-- Pending Approvals Section -->
+{% if pending_users %}
+<div class="card border-warning border-2 p-3 shadow-sm mb-4 bg-warning bg-opacity-10">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="d-flex align-items-center">
+            <span class="spinner-grow spinner-grow-sm text-warning me-2" role="status"></span>
+            <h5 class="fw-bold mb-0 text-dark">
+                <i class="bi bi-clock-history text-warning me-1"></i> คำขอสมัครสมาชิกรออนุมัติ
+            </h5>
+            <span class="badge bg-warning text-dark ms-2">{{ pending_users|length }} รายการ</span>
+        </div>
+    </div>
+
+    <div class="table-responsive font-sarabun bg-white rounded border">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>วันที่สมัคร</th>
+                    <th>ชื่อผู้ใช้ (Username)</th>
+                    <th>ชื่อ - นามสกุล</th>
+                    <th>เบอร์โทร / LINE</th>
+                    <th>แพ็กเกจที่เลือก</th>
+                    <th class="text-end" style="width: 20%;">การดำเนินการ</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pu in pending_users %}
+                <tr>
+                    <td class="small text-muted">{{ pu.created_at }}</td>
+                    <td class="fw-bold text-primary">
+                        <i class="bi bi-person me-1"></i> {{ pu.username }}
+                    </td>
+                    <td>{{ pu.full_name }}</td>
+                    <td><code>{{ pu.phone or '-' }}</code></td>
+                    <td>
+                        <span class="badge bg-primary-subtle text-primary fs-6">{{ pu.plan_name or 'เช่า 1 เดือน' }}</span>
+                    </td>
+                    <td class="text-end">
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-success px-3" onclick="approveUser({{ pu.id }}, '{{ pu.username }}', '{{ pu.plan_name }}')">
+                                <i class="bi bi-check-lg me-1"></i> กดอนุมัติ
+                            </button>
+                            <button class="btn btn-outline-danger" onclick="rejectUser({{ pu.id }}, '{{ pu.username }}')">
+                                <i class="bi bi-x-lg me-1"></i> ปฏิเสธ
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- Main Users Table -->
+<div class="card p-3 shadow-sm">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="fw-bold mb-0">รายชื่อผู้ใช้งานทั้งหมด</h5>
+        <span class="text-muted small">ทั้งหมด {{ users|length }} บัญชี</span>
+    </div>
+
+    <div class="table-responsive font-sarabun">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th style="width: 4%;">#</th>
+                    <th>ชื่อผู้ใช้ (Username)</th>
+                    <th>ชื่อ - นามสกุล</th>
+                    <th>เบอร์ติดต่อ</th>
+                    <th>แพ็กเกจการใช้งาน</th>
+                    <th class="text-center">สถานะบัญชี</th>
+                    <th>วันหมดอายุ</th>
+                    <th class="text-center">เครื่องที่ผูก (MAC)</th>
+                    <th class="text-center">แปลงแล้ว</th>
+                    <th class="text-end" style="width: 22%;">การจัดการ</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                <tr>
+                    <td class="text-muted">{{ loop.index }}</td>
+                    <td class="fw-bold text-primary">
+                        <i class="bi bi-person-fill me-1"></i> {{ u.username }}
+                        {% if u.role == 'admin' %}
+                        <span class="badge badge-admin ms-1">Admin</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ u.full_name }}</td>
+                    <td class="small">{{ u.phone or '-' }}</td>
+                    <td>
+                        <span class="badge bg-light text-dark border">{{ u.plan_name or 'ซื้อขาด' }}</span>
+                    </td>
+                    <td class="text-center">
+                        {% if u.status == 'active' %}
+                        <span class="badge badge-active"><i class="bi bi-check-circle me-1"></i> ปกติ (Active)</span>
+                        {% elif u.status == 'pending' %}
+                        <span class="badge bg-warning text-dark"><i class="bi bi-clock me-1"></i> รออนุมัติ</span>
+                        {% elif u.status == 'expired' %}
+                        <span class="badge bg-secondary text-white"><i class="bi bi-hourglass-bottom me-1"></i> หมดอายุ</span>
+                        {% else %}
+                        <span class="badge badge-suspended"><i class="bi bi-slash-circle me-1"></i> ระงับสิทธิ์</span>
+                        {% endif %}
+                    </td>
+                    <td class="small">
+                        {% if u.expires_at %}
+                        <span class="text-danger fw-medium">{{ u.expires_at }}</span>
+                        {% else %}
+                        <span class="text-success"><i class="bi bi-infinity"></i> ตลอดชีพ</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-center">
+                        {% if u.role != 'admin' %}
+                        <button class="btn btn-sm py-1 px-2 {{ 'btn-danger text-white' if (u.device_count or 0) >= 3 else ('btn-outline-primary' if (u.device_count or 0) > 0 else 'btn-outline-secondary') }}"
+                                onclick="openDevicesModal({{ u.id }}, '{{ u.username }}')"
+                                title="คลิกเพื่อจัดการเครื่องที่ผูกสิทธิ์ (MAC Address)">
+                            <i class="bi bi-laptop me-1"></i>
+                            <strong>{{ u.device_count or 0 }}/3</strong> เครื่อง
+                        </button>
+                        {% else %}
+                        <span class="badge bg-secondary-subtle text-secondary">ไม่จำกัด</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-center">
+                        <span class="badge bg-primary-subtle text-primary">{{ u.total_conversions }} ไฟล์ ({{ u.total_pages }} หน้า)</span>
+                    </td>
+                    <td class="text-end">
+                        {% if u.role != 'admin' %}
+                        <div class="btn-group btn-group-sm">
+                            <!-- If pending, show Approve button -->
+                            {% if u.status == 'pending' %}
+                            <button class="btn btn-sm btn-success" onclick="approveUser({{ u.id }}, '{{ u.username }}', '{{ u.plan_name }}')">
+                                <i class="bi bi-check-circle me-1"></i> อนุมัติ
+                            </button>
+                            {% else %}
+                            <!-- Toggle Suspend Button -->
+                            <button class="btn {{ 'btn-outline-danger' if u.status == 'active' else 'btn-outline-success' }}" 
+                                    title="{{ 'ระงับการใช้งาน' if u.status == 'active' else 'เปิดใช้งาน' }}"
+                                    onclick="toggleUserStatus({{ u.id }}, '{{ u.username }}', '{{ u.status }}')">
+                                <i class="bi {{ 'bi-slash-circle' if u.status == 'active' else 'bi-check-circle' }} me-1"></i>
+                                {{ 'ระงับใช้' if u.status == 'active' else 'ปลดระงับ' }}
+                            </button>
+                            {% endif %}
+                            <!-- Extend Subscription Button -->
+                            <button class="btn btn-outline-primary" 
+                                    title="ต่ออายุสัญญาเช่า / ปรับแพ็กเกจ"
+                                    onclick="openExtendModal({{ u.id }}, '{{ u.username }}', '{{ u.plan_name }}', '{{ u.expires_at or '' }}')">
+                                <i class="bi bi-calendar-plus me-1"></i> ต่ออายุ
+                            </button>
+                            <!-- Reset Password Button -->
+                            <button class="btn btn-outline-secondary" 
+                                    title="เปลี่ยนรหัสผ่าน"
+                                    onclick="openResetPasswordModal({{ u.id }}, '{{ u.username }}')">
+                                <i class="bi bi-key"></i>
+                            </button>
+                            <!-- Delete Button -->
+                            <button class="btn btn-outline-danger" 
+                                    title="ลบผู้ใช้"
+                                    onclick="deleteUser({{ u.id }}, '{{ u.username }}')">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                        {% else %}
+                        <button class="btn btn-sm btn-outline-warning" 
+                                title="เปลี่ยนรหัสผ่าน Admin"
+                                onclick="openResetPasswordModal({{ u.id }}, '{{ u.username }}')">
+                            <i class="bi bi-key-fill me-1"></i> เปลี่ยนรหัสผ่าน
+                        </button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Modal: Add New User -->
+<div class="modal fade" id="addUserModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form action="{{ url_for('admin_create_user') }}" method="POST">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-person-plus text-primary me-2"></i> เพิ่มผู้ใช้งานใหม่</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium">ชื่อผู้ใช้งาน (Username) <span class="text-danger">*</span></label>
+                        <input type="text" name="username" class="form-control" placeholder="เช่น user2" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium">รหัสผ่าน (Password) <span class="text-danger">*</span></label>
+                        <input type="password" name="password" class="form-control" placeholder="กรอกรหัสผ่าน" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium">ชื่อ - นามสกุล ผู้ใช้งาน <span class="text-danger">*</span></label>
+                        <input type="text" name="full_name" class="form-control" placeholder="เช่น สมชาย ใจดี" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium">เบอร์โทรศัพท์ / LINE ID</label>
+                        <input type="text" name="phone" class="form-control" placeholder="เช่น 081-234-5678">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium">แพ็กเกจการใช้งาน</label>
+                        <select name="plan_type" class="form-select">
+                            <option value="rental_1m">เช่า 1 เดือน (3,000 บาท)</option>
+                            <option value="rental_3m">เช่า 3 เดือน (8,700 บาท)</option>
+                            <option value="rental_6m">เช่า 6 เดือน (16,000 บาท)</option>
+                            <option value="rental_1y">เช่า 1 ปี (25,000 บาท)</option>
+                            <option value="lifetime" selected>ซื้อขาด (ตลอดชีพ)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium">บทบาท (Role)</label>
+                        <select name="role" class="form-select">
+                            <option value="user" selected>ผู้ใช้งานทั่วไป (User)</option>
+                            <option value="admin">ผู้ดูแลระบบ (Admin)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+                    <button type="submit" class="btn btn-primary">บันทึกและเปิดใช้งานทันที</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Reset Password -->
+<div class="modal fade" id="resetPasswordModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold"><i class="bi bi-key text-warning me-2"></i> เปลี่ยนรหัสผ่าน</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="resetUserId">
+                <p>เปลี่ยนรหัสผ่านสำหรับผู้ใช้: <strong id="resetUsername" class="text-primary"></strong></p>
+                <div class="mb-3">
+                    <label class="form-label small fw-medium">รหัสผ่านใหม่</label>
+                    <input type="password" id="newPasswordInput" class="form-control" placeholder="กรอกรหัสผ่านใหม่อย่างน้อย 4 ตัวอักษร" required>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+                <button type="button" class="btn btn-warning" onclick="submitResetPassword()">บันทึกรหัสผ่านใหม่</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Manage User Devices (MAC Address Binding) -->
+<div class="modal fade" id="devicesModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-light">
+                <div>
+                    <h5 class="modal-title fw-bold">
+                        <i class="bi bi-laptop text-primary me-2"></i> จัดการเครื่องที่ผูกสิทธิ์ (MAC Address)
+                    </h5>
+                    <small class="text-muted">ผู้ใช้: <strong id="devModalUsername" class="text-primary"></strong> (จำกัดสูงสุด 3 เครื่อง)</small>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <span class="badge bg-primary fs-6" id="devModalBadge">0 / 3 เครื่อง</span>
+                        <span class="text-muted small ms-2" id="devModalSlotRemain">เหลือสิทธิ์ 3 เครื่อง</span>
+                    </div>
+                    <button class="btn btn-sm btn-outline-danger" id="btnResetAllDevices" onclick="submitResetAllDevices()">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i> รีเซ็ตสิทธิ์เครื่องทั้งหมด (คืนครบ 3 สิทธิ์)
+                    </button>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle border">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 5%;">#</th>
+                                <th>ชื่อเครื่อง (Device Name)</th>
+                                <th>MAC Address</th>
+                                <th>วันที่ผูกเครื่อง</th>
+                                <th>ใช้งานล่าสุด</th>
+                                <th class="text-end" style="width: 18%;">การดำเนินการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="devModalTableBody">
+                            <!-- Populated via JS -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="alert alert-info border-0 mt-3 mb-0 small">
+                    <i class="bi bi-info-circle me-1"></i> <strong>คำแนะนำ:</strong> เมื่อลูกค้าเปลี่ยนคอมพิวเตอร์ หรือเครื่องเดิมเสีย คุณสามารถกดปุ่ม <strong>"ถอดสิทธิ์เครื่องนี้"</strong> เพื่อคืนโควต้าให้ลูกค้านำไปลงบนคอมพิวเตอร์เครื่องใหม่ได้ทันที
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ปิดหน้าต่าง</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Extend Subscription -->
+<div class="modal fade" id="extendModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-light">
+                <h5 class="modal-title fw-bold"><i class="bi bi-calendar-plus text-primary me-2"></i> ต่ออายุสัญญาเช่า / ปรับแพ็กเกจ</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="extendUserId">
+                <p>ผู้ใช้งาน: <strong id="extendUsername" class="text-primary fs-5"></strong></p>
+                <div class="alert alert-secondary py-2 small mb-3">
+                    <div>แพ็กเกจปัจจุบัน: <span id="extendCurrentPlan" class="fw-bold"></span></div>
+                    <div>วันหมดอายุปัจจุบัน: <span id="extendCurrentExp" class="fw-bold text-danger"></span></div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label small fw-medium">เลือกแพ็กเกจต่ออายุ</label>
+                    <select id="extendPlanSelect" class="form-select">
+                        <option value="rental_1m" data-days="30">เช่า 1 เดือน (+30 วัน) - 3,000 บาท</option>
+                        <option value="rental_3m" data-days="90">เช่า 3 เดือน (+90 วัน) - 8,700 บาท</option>
+                        <option value="rental_6m" data-days="180">เช่า 6 เดือน (+180 วัน) - 16,000 บาท</option>
+                        <option value="rental_1y" data-days="365">เช่า 1 ปี (+365 วัน) - 25,000 บาท</option>
+                        <option value="lifetime" data-days="lifetime">ซื้อขาด (สิทธิ์ตลอดชีพ)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+                <button type="button" class="btn btn-primary" onclick="submitExtendSubscription()">
+                    <i class="bi bi-check-lg me-1"></i> บันทึกการต่ออายุ
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function approveUser(userId, username, planName) {
+        const result = await Swal.fire({
+            title: 'อนุมัติการใช้งาน?',
+            text: `ต้องการอนุมัติบัญชีผู้ใช้ "${username}" (${planName}) หรือไม่? ระบบจะเริ่มนับอายุการใช้งานและเปิดสิทธิ์ให้เข้าสู่ระบบได้ทันที`,
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonColor: '#0e9f6e',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: 'ใช่, อนุมัติทันที!',
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (result.isConfirmed) {
+            try {
+                const response = await fetch(`/admin/users/approve/${userId}`, { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    await Swal.fire({ icon: 'success', title: 'อนุมัติสำเร็จ', text: data.message, timer: 1500, showConfirmButton: false });
+                    location.reload();
+                } else {
+                    Swal.fire({ icon: 'error', text: data.message });
+                }
+            } catch (err) {
+                Swal.fire({ icon: 'error', text: err.message });
+            }
+        }
+    }
+
+    async function rejectUser(userId, username) {
+        const result = await Swal.fire({
+            title: 'ปฏิเสธคำขอสมัคร?',
+            text: `ต้องการปฏิเสธคำขอของ "${username}" หรือไม่?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#d33',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: 'ใช่, ปฏิเสธคำขอ',
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (result.isConfirmed) {
+            try {
+                const response = await fetch(`/admin/users/reject/${userId}`, { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    await Swal.fire({ icon: 'success', title: 'สำเร็จ', text: data.message, timer: 1500, showConfirmButton: false });
+                    location.reload();
+                } else {
+                    Swal.fire({ icon: 'error', text: data.message });
+                }
+            } catch (err) {
+                Swal.fire({ icon: 'error', text: err.message });
+            }
+        }
+    }
+
+    async function toggleUserStatus(userId, username, currentStatus) {
+        const actionText = currentStatus === 'active' ? 'ระงับการใช้งาน' : 'เปิดใช้งาน';
+        const confirmColor = currentStatus === 'active' ? '#d33' : '#0e9f6e';
+
+        const result = await Swal.fire({
+            title: `ยืนยันการ${actionText}?`,
+            text: `คุณต้องการ${actionText}บัญชีผู้ใช้ "${username}" หรือไม่? (หากระงับ ผู้ใช้จะไม่สามารถล็อกอินเข้าสู่ระบบได้ทันที)`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: confirmColor,
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: `ใช่, ${actionText}!`,
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (result.isConfirmed) {
+            try {
+                const response = await fetch(`/admin/users/toggle/${userId}`, { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    await Swal.fire({ icon: 'success', title: 'สำเร็จ', text: data.message, timer: 1500, showConfirmButton: false });
+                    location.reload();
+                } else {
+                    Swal.fire({ icon: 'error', text: data.message });
+                }
+            } catch (err) {
+                Swal.fire({ icon: 'error', text: err.message });
+            }
+        }
+    }
+
+    function openResetPasswordModal(userId, username) {
+        document.getElementById('resetUserId').value = userId;
+        document.getElementById('resetUsername').textContent = username;
+        document.getElementById('newPasswordInput').value = '';
+        new bootstrap.Modal(document.getElementById('resetPasswordModal')).show();
+    }
+
+    async function submitResetPassword() {
+        const userId = document.getElementById('resetUserId').value;
+        const newPassword = document.getElementById('newPasswordInput').value;
+
+        if (!newPassword || newPassword.length < 4) {
+            Swal.fire({ icon: 'warning', text: 'รหัสผ่านต้องมีความยาวอย่างน้อย 4 ตัวอักษร' });
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('new_password', newPassword);
+
+        try {
+            const response = await fetch(`/admin/users/reset-password/${userId}`, { method: 'POST', body: formData });
+            const data = await response.json();
+            if (data.success) {
+                bootstrap.Modal.getInstance(document.getElementById('resetPasswordModal')).hide();
+                Swal.fire({ icon: 'success', title: 'สำเร็จ', text: data.message });
+            } else {
+                Swal.fire({ icon: 'error', text: data.message });
+            }
+        } catch (err) {
+            Swal.fire({ icon: 'error', text: err.message });
+        }
+    }
+
+    async function deleteUser(userId, username) {
+        const result = await Swal.fire({
+            title: 'ยืนยันการลบผู้ใช้?',
+            text: `ต้องการลบบัญชีผู้ใช้ "${username}" ถาวรหรือไม่? ประวัติการใช้งานของผู้ใช้นี้จะถูกลบด้วย`,
+            icon: 'error',
+            showCancelButton: true,
+            confirmButtonColor: '#d33',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: 'ใช่, ลบเลย!',
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (result.isConfirmed) {
+            try {
+                const response = await fetch(`/admin/users/delete/${userId}`, { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    await Swal.fire({ icon: 'success', title: 'ลบสำเร็จ', text: data.message, timer: 1500, showConfirmButton: false });
+                    location.reload();
+                } else {
+                    Swal.fire({ icon: 'error', text: data.message });
+                }
+            } catch (err) {
+                Swal.fire({ icon: 'error', text: err.message });
+            }
+        }
+    }
+
+    // =====================================
+    // Device Management JS (Max 3 Machines)
+    // =====================================
+    let currentDevUserId = null;
+    let currentDevUsername = '';
+
+    async function openDevicesModal(userId, username) {
+        currentDevUserId = userId;
+        currentDevUsername = username;
+        document.getElementById('devModalUsername').textContent = username;
+        await reloadDevicesList();
+        new bootstrap.Modal(document.getElementById('devicesModal')).show();
+    }
+
+    async function reloadDevicesList() {
+        const tbody = document.getElementById('devModalTableBody');
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-3 text-muted"><span class="spinner-border spinner-border-sm me-2"></span>กำลังโหลดข้อมูลเครื่อง...</td></tr>';
+        
+        try {
+            const resp = await fetch(`/admin/users/${currentDevUserId}/devices`);
+            const data = await resp.json();
+            
+            if (!data.success) {
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-3">เกิดข้อผิดพลาดในการโหลดข้อมูล</td></tr>`;
+                return;
+            }
+            
+            const count = data.count || 0;
+            const max = data.max_devices || 3;
+            const remain = max - count;
+            
+            const badge = document.getElementById('devModalBadge');
+            badge.textContent = `${count} / ${max} เครื่อง`;
+            badge.className = `badge fs-6 ${count >= max ? 'bg-danger' : 'bg-primary'}`;
+            document.getElementById('devModalSlotRemain').textContent = count >= max ? 'เต็มโควต้าแล้ว' : `เหลือโควต้าอีก ${remain} เครื่อง`;
+            
+            if (!data.devices || data.devices.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4"><i class="bi bi-laptop fs-3 d-block mb-2 text-secondary"></i>ยังไม่มีเครื่องคอมพิวเตอร์ผูกกับบัญชีนี้ (โควต้าว่าง ${max} เครื่อง)</td></tr>`;
+                return;
+            }
+            
+            tbody.innerHTML = data.devices.map((dev, idx) => `
+                <tr>
+                    <td class="text-muted">${idx + 1}</td>
+                    <td class="fw-medium text-dark"><i class="bi bi-pc me-1 text-primary"></i> ${dev.device_name || 'เครื่องที่ ' + (idx + 1)}</td>
+                    <td><code class="fw-bold fs-6 text-primary">${dev.mac_address}</code></td>
+                    <td class="small text-muted">${dev.registered_at || '-'}</td>
+                    <td class="small text-muted">${dev.last_seen || '-'}</td>
+                    <td class="text-end">
+                        <button class="btn btn-sm btn-outline-danger" onclick="revokeSingleDevice(${dev.id}, '${dev.device_name || dev.mac_address}')">
+                            <i class="bi bi-x-circle me-1"></i> ถอดสิทธิ์
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-3">${err.message}</td></tr>`;
+        }
+    }
+
+    async function revokeSingleDevice(deviceId, deviceLabel) {
+        const result = await Swal.fire({
+            title: 'ถอดสิทธิ์เครื่องนี้?',
+            text: `ต้องการถอดสิทธิ์เครื่อง "${deviceLabel}" หรือไม่? เมื่อถอดแล้วจะสามารถนำสิทธิ์ไปลงเครื่องอื่นได้`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#d33',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: 'ใช่, ถอดสิทธิ์',
+            cancelButtonText: 'ยกเลิก'
+        });
+        
+        if (result.isConfirmed) {
+            try {
+                const resp = await fetch(`/admin/devices/revoke/${deviceId}`, { method: 'POST' });
+                const data = await resp.json();
+                if (data.success) {
+                    await Swal.fire({ icon: 'success', title: 'สำเร็จ', text: data.message, timer: 1500, showConfirmButton: false });
+                    await reloadDevicesList();
+                    location.reload();
+                } else {
+                    Swal.fire({ icon: 'error', text: data.message });
+                }
+            } catch (err) {
+                Swal.fire({ icon: 'error', text: err.message });
+            }
+        }
+    }
+
+    async function submitResetAllDevices() {
+        const result = await Swal.fire({
+            title: 'รีเซ็ตสิทธิ์เครื่องทั้งหมด?',
+            text: `ต้องการรีเซ็ตสิทธิ์อุปกรณ์ทั้งหมดของผู้ใช้ "${currentDevUsername}" หรือไม่? เครื่องเดิมทั้งหมดจะไม่สามารถใช้งานได้จนกว่าจะเปิดโปรแกรมและลงทะเบียนใหม่`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#d33',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: 'ใช่, รีเซ็ตทั้งหมด',
+            cancelButtonText: 'ยกเลิก'
+        });
+        
+        if (result.isConfirmed) {
+            try {
+                const resp = await fetch(`/admin/devices/reset/${currentDevUserId}`, { method: 'POST' });
+                const data = await resp.json();
+                if (data.success) {
+                    await Swal.fire({ icon: 'success', title: 'รีเซ็ตสำเร็จ', text: data.message, timer: 1500, showConfirmButton: false });
+                    await reloadDevicesList();
+                    location.reload();
+                } else {
+                    Swal.fire({ icon: 'error', text: data.message });
+                }
+            } catch (err) {
+                Swal.fire({ icon: 'error', text: err.message });
+            }
+        }
+    }
+
+    // =====================================
+    // Extend / Renew Subscription JS
+    // =====================================
+    function openExtendModal(userId, username, currentPlan, currentExp) {
+        document.getElementById('extendUserId').value = userId;
+        document.getElementById('extendUsername').textContent = username;
+        document.getElementById('extendCurrentPlan').textContent = currentPlan || 'เช่า 1 เดือน';
+        document.getElementById('extendCurrentExp').textContent = currentExp ? currentExp : 'สิทธิ์ตลอดชีพ';
+        new bootstrap.Modal(document.getElementById('extendModal')).show();
+    }
+
+    async function submitExtendSubscription() {
+        const userId = document.getElementById('extendUserId').value;
+        const select = document.getElementById('extendPlanSelect');
+        const planType = select.value;
+        const days = select.options[select.selectedIndex].getAttribute('data-days');
+
+        const formData = new FormData();
+        formData.append('plan_type', planType);
+        formData.append('days', days);
+
+        try {
+            const resp = await fetch(`/admin/users/extend/${userId}`, { method: 'POST', body: formData });
+            const data = await resp.json();
+            if (data.success) {
+                bootstrap.Modal.getInstance(document.getElementById('extendModal')).hide();
+                await Swal.fire({ icon: 'success', title: 'สำเร็จ', text: data.message, timer: 1500, showConfirmButton: false });
+                location.reload();
+            } else {
+                Swal.fire({ icon: 'error', text: data.message });
+            }
+        } catch (err) {
+            Swal.fire({ icon: 'error', text: err.message });
+        }
+    }
+</script>
+{% endblock %}

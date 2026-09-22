@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}เข้าสู่ระบบ - PDF to Excel System{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center align-items-center" style="min-height: 70vh;">
+    <div class="col-md-5 col-lg-4">
+        <div class="card shadow-lg p-4">
+            <div class="text-center mb-4">
+                <div class="d-inline-flex align-items-center justify-content-center bg-primary bg-opacity-10 text-primary rounded-circle mb-3" style="width: 70px; height: 70px;">
+                    <i class="bi bi-file-earmark-spreadsheet fs-1"></i>
+                </div>
+                <h4 class="fw-bold mb-1">เข้าสู่ระบบ</h4>
+                <p class="text-muted small">ระบบแปลงไฟล์ PDF หลายหน้า เป็น Excel</p>
+            </div>
+
+            <form method="POST" action="{{ url_for('login') }}">
+                <div class="mb-3">
+                    <label class="form-label text-secondary small fw-medium">ชื่อผู้ใช้งาน (Username)</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-light"><i class="bi bi-person text-secondary"></i></span>
+                        <input type="text" name="username" class="form-control" placeholder="กรอกชื่อผู้ใช้" value="{{ username or '' }}" required autofocus>
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label text-secondary small fw-medium">รหัสผ่าน (Password)</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-light"><i class="bi bi-lock text-secondary"></i></span>
+                        <input type="password" name="password" class="form-control" placeholder="กรอกรหัสผ่าน" required>
+                    </div>
+                </div>
+
+                <input type="hidden" name="client_type" id="client_type" value="">
+                <input type="hidden" name="device_mac" id="device_mac" value="">
+                <input type="hidden" name="device_name" id="device_name" value="">
+
+                <button type="submit" class="btn btn-primary w-100 py-2 mb-3">
+                    <i class="bi bi-box-arrow-in-right me-1"></i> เข้าสู่ระบบ
+                </button>
+
+                <div class="text-center mt-3 pt-3 border-top">
+                    <span class="text-muted small">ยังไม่มีบัญชีผู้ใช้งาน?</span>
+                    <a href="{{ url_for('register') }}" class="small fw-bold text-primary text-decoration-none ms-1">
+                        <i class="bi bi-person-plus me-1"></i>สมัครสมาชิกที่นี่
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+// ตรวจสอบว่าเปิดผ่าน Desktop App หรือไม่ (หากเป็นเว็บออนไลน์จะไม่จำกัดเครื่อง)
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get('client_type') === 'desktop') {
+    const clientTypeElem = document.getElementById('client_type');
+    if (clientTypeElem) clientTypeElem.value = 'desktop';
+
+    // ตรวจจับ MAC Address เฉพาะเมื่อเปิดผ่าน Desktop Application
+    fetch('{{ url_for("api_device_info") }}')
+        .then(r => r.json())
+        .then(data => {
+            if (data && data.primary_mac) {
+                const macElem = document.getElementById('device_mac');
+                const nameElem = document.getElementById('device_name');
+                if (macElem) macElem.value = data.primary_mac;
+                if (nameElem) nameElem.value = data.hostname || '';
+            }
+        })
+        .catch(() => {});
+}
+</script>
+{% endblock %}

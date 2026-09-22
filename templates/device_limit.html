@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}แจ้งเตือน: อุปกรณ์ครบกำหนด 3 เครื่อง - PDF to Excel System{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center align-items-center" style="min-height: 70vh;">
+    <div class="col-md-7 col-lg-6">
+        <div class="card shadow-lg p-4 border-top border-4 border-warning">
+            <div class="text-center mb-4">
+                <div class="d-inline-flex align-items-center justify-content-center bg-warning bg-opacity-15 text-warning rounded-circle mb-3" style="width: 80px; height: 80px;">
+                    <i class="bi bi-laptop fs-1 text-warning"></i>
+                </div>
+                <h4 class="fw-bold text-dark mb-1">ใช้งานครบโควต้า 3 เครื่องแล้ว</h4>
+                <p class="text-muted small">สิทธิ์การติดตั้งหรือเข้าใช้งานของบัญชีนี้จำกัดสูงสุดไม่เกิน 3 เครื่อง</p>
+            </div>
+
+            <div class="alert alert-danger d-flex align-items-center mb-4 py-3">
+                <i class="bi bi-exclamation-triangle-fill fs-4 me-3 text-danger"></i>
+                <div>
+                    <div class="fw-bold">{{ error or 'บัญชีนี้ใช้งานครบโควต้า 3 เครื่องแล้ว ไม่สามารถเพิ่มเครื่องใหม่ได้' }}</div>
+                    <small class="text-muted">หากคุณต้องการเปลี่ยนเครื่องใช้งาน กรุณาแจ้งผู้ดูแลระบบเพื่อปลดล็อกเครื่องเดิม</small>
+                </div>
+            </div>
+
+            <!-- MAC Address Info Box -->
+            <div class="bg-light p-3 rounded-3 border mb-4">
+                <label class="form-label text-secondary small fw-medium mb-1">
+                    <i class="bi bi-cpu me-1"></i> ค่า MAC Address ของเครื่องปัจจุบัน:
+                </label>
+                <div class="input-group">
+                    <input type="text" id="macAddressDisplay" class="form-control font-monospace fw-bold text-primary bg-white" value="{{ mac }}" readonly>
+                    <button class="btn btn-outline-primary" type="button" onclick="copyMacAddress()">
+                        <i class="bi bi-clipboard me-1" id="copyIcon"></i> <span id="copyText">คัดลอก</span>
+                    </button>
+                </div>
+                <div class="small text-muted mt-2">
+                    <i class="bi bi-info-circle me-1"></i> สามารถคัดลอกค่า MAC Address ด้านบนนี้ ส่งให้ผู้ดูแลระบบ (Admin) เพื่อตรวจสอบสิทธิ์หรือเพิ่มเข้าระบบ
+                </div>
+            </div>
+
+            <div class="card bg-body-tertiary border-0 p-3 mb-4">
+                <h6 class="fw-bold mb-2 small text-secondary"><i class="bi bi-question-circle me-1"></i> สิ่งที่คุณสามารถทำได้:</h6>
+                <ul class="small text-muted mb-0 ps-3">
+                    <li class="mb-1">กลับไปใช้งานบนคอมพิวเตอร์ 3 เครื่องแรกที่เคยลงทะเบียนไว้</li>
+                    <li class="mb-1">ติดต่อผู้ดูแลระบบ (Admin) เพื่อขอ <strong>"ถอดสิทธิ์เครื่องเก่า"</strong> ที่ไม่ได้ใช้งานแล้วออก</li>
+                    <li>อัปเกรดหรือสั่งซื้อสิทธิ์ License เพิ่มเติม</li>
+                </ul>
+            </div>
+
+            <div class="d-flex gap-2">
+                <a href="{{ url_for('login') }}" class="btn btn-primary w-100 py-2">
+                    <i class="bi bi-arrow-left me-1"></i> กลับสู่หน้าเข้าสู่ระบบ
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function copyMacAddress() {
+    const macInput = document.getElementById('macAddressDisplay');
+    navigator.clipboard.writeText(macInput.value).then(() => {
+        const copyText = document.getElementById('copyText');
+        const copyIcon = document.getElementById('copyIcon');
+        copyText.innerText = 'คัดลอกแล้ว!';
+        copyIcon.className = 'bi bi-check-lg text-success';
+        setTimeout(() => {
+            copyText.innerText = 'คัดลอก';
+            copyIcon.className = 'bi bi-clipboard';
+        }, 2500);
+    }).catch(err => {
+        macInput.select();
+        document.execCommand('copy');
+        alert('คัดลอก MAC Address เรียบร้อยแล้ว');
+    });
+}
+</script>
+{% endblock %}

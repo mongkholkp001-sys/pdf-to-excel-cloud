@@ -1,0 +1,466 @@
+{% extends "base.html" %}
+
+{% block title %}แดชบอร์ดผู้ดูแลระบบ (Admin Dashboard){% endblock %}
+
+{% block content %}
+<!-- Header -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h3 class="fw-bold mb-1">แดชบอร์ดภาพรวมระบบ</h3>
+        <p class="text-muted mb-0">รายงานสถิติการใช้งาน และการแปลงไฟล์ PDF เป็น Excel ทั้งหมดในระบบ</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('admin_users') }}" class="btn btn-outline-primary">
+            <i class="bi bi-people me-1"></i> จัดการผู้ใช้ & ระงับสิทธิ์
+        </a>
+        <a href="{{ url_for('admin_reports') }}" class="btn btn-primary">
+            <i class="bi bi-file-text me-1"></i> ดูรายงานทั้งหมด
+        </a>
+    </div>
+</div>
+
+{% if stats.pending_users > 0 %}
+<div class="alert alert-warning border-0 shadow-sm d-flex justify-content-between align-items-center mb-4 p-3 rounded-3" style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-left: 5px solid #f59e0b !important;">
+    <div class="d-flex align-items-center">
+        <div class="bg-warning bg-opacity-25 text-warning-emphasis p-2 rounded-circle me-3">
+            <i class="bi bi-person-exclamation fs-3 text-warning"></i>
+        </div>
+        <div>
+            <h6 class="fw-bold mb-1 text-dark">มีคำขอสมัครสมาชิกรอการอนุมัติ {{ stats.pending_users }} บัญชี</h6>
+            <small class="text-muted">มีผู้ใช้งานใหม่สมัครสมาชิกและเลือกแพ็กเกจ กรุณาตรวจสอบและกดอนุมัติสิทธิ์</small>
+        </div>
+    </div>
+    <a href="{{ url_for('admin_users') }}" class="btn btn-warning fw-semibold shadow-sm px-3">
+        <i class="bi bi-check2-circle me-1"></i> ไปตรวจสอบและอนุมัติทันที
+    </a>
+</div>
+{% endif %}
+
+<!-- Month Selector Filter Bar -->
+<div class="card p-3 mb-4 border-0 shadow-sm rounded-3 bg-white">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+        <div class="d-flex align-items-center gap-2">
+            <div class="bg-primary bg-opacity-10 text-primary p-2 rounded-circle">
+                <i class="bi bi-calendar3 fs-4"></i>
+            </div>
+            <div>
+                <strong class="d-block text-dark fs-6">ตัวกรองสถิติการใช้งานตามเดือน:</strong>
+                <small class="text-muted">
+                    {% if selected_month %}
+                        กำลังแสดงข้อมูลของเดือน: <span class="badge bg-primary text-white fw-bold px-2 py-1">{{ selected_month }}</span>
+                    {% else %}
+                        กำลังแสดงสถิติภาพรวมทั้งหมด (ทุกเดือน)
+                    {% endif %}
+                </small>
+            </div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <label for="monthFilter" class="form-label mb-0 fw-semibold text-secondary small text-nowrap">เลือกเดือน:</label>
+            <select id="monthFilter" class="form-select shadow-sm" style="min-width: 230px;" onchange="changeMonthFilter(this.value)">
+                <option value="" {% if not selected_month %}selected{% endif %}>📅 ดูข้อมูลทุกเดือน (ภาพรวมทั้งหมด)</option>
+                {% for m in available_months %}
+                <option value="{{ m.value }}" {% if selected_month == m.value %}selected{% endif %}>
+                    📅 {{ m.label }}
+                </option>
+                {% endfor %}
+            </select>
+            {% if selected_month %}
+            <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary" title="ล้างตัวกรองกลับสู่ภาพรวมทั้งหมด">
+                <i class="bi bi-x-circle me-1"></i> ล้างตัวกรอง
+            </a>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Stat Cards -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card p-3 border-start border-4 border-primary shadow-sm">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="text-muted small fw-medium">ผู้ใช้งานทั้งหมด</div>
+                    <div class="fs-3 fw-bold">{{ stats.total_users }} <span class="fs-6 fw-normal text-muted">คน</span></div>
+                </div>
+                <div class="bg-primary bg-opacity-10 text-primary p-3 rounded-circle">
+                    <i class="bi bi-people fs-4"></i>
+                </div>
+            </div>
+            <div class="mt-2 small text-muted">
+                <span class="text-success"><i class="bi bi-check-circle"></i> ปกติ: {{ stats.active_users }}</span> | 
+                <span class="text-danger"><i class="bi bi-slash-circle"></i> ระงับ: {{ stats.suspended_users }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card p-3 border-start border-4 border-success shadow-sm">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="text-muted small fw-medium">จำนวนไฟล์ที่แปลงแล้ว</div>
+                    <div class="fs-3 fw-bold">{{ stats.total_conversions }} <span class="fs-6 fw-normal text-muted">ไฟล์</span></div>
+                </div>
+                <div class="bg-success bg-opacity-10 text-success p-3 rounded-circle">
+                    <i class="bi bi-file-earmark-pdf fs-4"></i>
+                </div>
+            </div>
+            <div class="mt-2 small text-muted">
+                <span><i class="bi bi-arrow-repeat"></i> จากผู้ใช้ทุกคนในระบบ</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card p-3 border-start border-4 border-info shadow-sm">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="text-muted small fw-medium">จำนวนหน้าที่แปลงทั้งหมด</div>
+                    <div class="fs-3 fw-bold">{{ stats.total_pages }} <span class="fs-6 fw-normal text-muted">หน้า</span></div>
+                </div>
+                <div class="bg-info bg-opacity-10 text-info p-3 rounded-circle">
+                    <i class="bi bi-files fs-4"></i>
+                </div>
+            </div>
+            <div class="mt-2 small text-muted">
+                <span><i class="bi bi-check2-all"></i> คิดเป็น {{ stats.total_rows }} แถวข้อมูลใน Excel</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card p-3 border-start border-4 border-warning shadow-sm">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="text-muted small fw-medium">สถานะการระงับสิทธิ์</div>
+                    <div class="fs-3 fw-bold">{{ stats.suspended_users }} <span class="fs-6 fw-normal text-muted">บัญชี</span></div>
+                </div>
+                <div class="bg-warning bg-opacity-10 text-warning p-3 rounded-circle">
+                    <i class="bi bi-shield-lock fs-4"></i>
+                </div>
+            </div>
+            <div class="mt-2 small text-muted">
+                <span><a href="{{ url_for('admin_users') }}" class="text-decoration-none">คลิกเพื่อจัดการสิทธิ์</a></span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- User Usage Report Table -->
+<div class="card p-4 mb-4 shadow-sm">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="fw-bold mb-0">
+            <i class="bi bi-bar-chart-line text-primary me-2"></i> รายงานสรุปการใช้งานของแต่ละ User
+        </h5>
+        <span class="badge bg-secondary-subtle text-secondary">แสดงผู้ใช้ทั้งหมด {{ users|length }} คน</span>
+    </div>
+
+    <div class="table-responsive font-sarabun">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>ผู้ใช้งาน (Username)</th>
+                    <th>ชื่อ - นามสกุล</th>
+                    <th class="text-center">บทบาท (Role)</th>
+                    <th class="text-center">สถานะบัญชี</th>
+                    <th class="text-center">แปลงไปแล้ว (ไฟล์)</th>
+                    <th class="text-center">หน้ารวมที่แปลง (หน้า/แถว)</th>
+                    <th>ล็อกอินล่าสุด</th>
+                    <th class="text-end">การจัดการสิทธิ์</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                <tr>
+                    <td class="fw-bold text-primary">
+                        <i class="bi bi-person me-1"></i> {{ u.username }}
+                    </td>
+                    <td>{{ u.full_name }}</td>
+                    <td class="text-center">
+                        <span class="badge {{ 'badge-admin' if u.role == 'admin' else 'badge-user' }}">
+                            {{ 'ผู้ดูแลระบบ (Admin)' if u.role == 'admin' else 'ผู้ใช้งานทั่วไป (User)' }}
+                        </span>
+                    </td>
+                    <td class="text-center">
+                        {% if u.status == 'active' %}
+                        <span class="badge badge-active"><i class="bi bi-check-circle me-1"></i> ปกติ (Active)</span>
+                        {% else %}
+                        <span class="badge badge-suspended"><i class="bi bi-slash-circle me-1"></i> ระงับสิทธิ์ (Suspended)</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-center fw-bold">{{ u.total_conversions }}</td>
+                    <td class="text-center">
+                        <span class="badge bg-light text-dark border">{{ u.total_pages }} หน้า</span>
+                    </td>
+                    <td class="text-muted small">
+                        {{ u.last_login or 'ยังไม่เคยล็อกอิน' }}
+                    </td>
+                    <td class="text-end">
+                        {% if u.role != 'admin' %}
+                        <button class="btn btn-sm {{ 'btn-outline-danger' if u.status == 'active' else 'btn-outline-success' }}" 
+                                onclick="toggleUserStatus({{ u.id }}, '{{ u.username }}', '{{ u.status }}')">
+                            <i class="bi {{ 'bi-slash-circle' if u.status == 'active' else 'bi-check-circle' }} me-1"></i>
+                            {{ 'ระงับการใช้งาน' if u.status == 'active' else 'ปลดระงับ' }}
+                        </button>
+                        {% else %}
+                        <span class="badge bg-light text-muted border">บัญชีหลัก</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Recent Conversions Activity -->
+<div class="card p-4 shadow-sm">
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+        <div>
+            <h5 class="fw-bold mb-0">
+                <i class="bi bi-activity text-success me-2"></i> ประวัติการแปลงไฟล์ล่าสุด (Recent Conversions)
+            </h5>
+            <small class="text-muted">
+                {% if selected_month %}
+                แสดงรายการเฉพาะเดือน <span class="fw-semibold text-primary">{{ selected_month }}</span>
+                {% else %}
+                แสดงประวัติล่าสุด (มีสิทธิ์ลบเฉพาะ Admin เท่านั้น)
+                {% endif %}
+            </small>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <!-- Batch Delete Button (Admin Only) -->
+            <button id="batchDeleteBtn" class="btn btn-sm btn-danger d-none shadow-sm fw-semibold" onclick="confirmBatchDelete()">
+                <i class="bi bi-trash-fill me-1"></i> ลบรายการที่เลือก (<span id="selectedCountBadge">0</span>)
+            </button>
+            <a href="{{ url_for('admin_reports') }}" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-file-text me-1"></i> ดูรายงานฉบับเต็ม
+            </a>
+        </div>
+    </div>
+
+    <div class="table-responsive font-sarabun">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th style="width: 40px;" class="text-center">
+                        <input type="checkbox" id="checkAllConversions" class="form-check-input" onchange="toggleSelectAll(this)" title="เลือกทั้งหมด">
+                    </th>
+                    <th>#</th>
+                    <th>ผู้ใช้งาน</th>
+                    <th>ชื่อไฟล์ PDF</th>
+                    <th class="text-center">จำนวนหน้า (แถว)</th>
+                    <th class="text-center">สถานะ</th>
+                    <th>เวลาที่แปลง</th>
+                    <th class="text-end">การจัดการ</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if recent_conversions %}
+                    {% for c in recent_conversions %}
+                    <tr id="row-conv-{{ c.id }}">
+                        <td class="text-center">
+                            <input type="checkbox" class="form-check-input conv-item-check" value="{{ c.id }}" onchange="handleItemCheck()">
+                        </td>
+                        <td class="text-muted">{{ loop.index }}</td>
+                        <td>
+                            <i class="bi bi-person text-secondary me-1"></i>
+                            <strong>{{ c.username }}</strong>
+                            <small class="text-muted">({{ c.full_name }})</small>
+                        </td>
+                        <td>
+                            <i class="bi bi-file-earmark-pdf text-danger me-1"></i>
+                            {{ c.original_filename }}
+                        </td>
+                        <td class="text-center">
+                            <span class="badge bg-primary-subtle text-primary">{{ c.page_count }} หน้า</span>
+                        </td>
+                        <td class="text-center">
+                            {% if c.status == 'success' %}
+                            <span class="badge badge-active">สำเร็จ</span>
+                            {% else %}
+                            <span class="badge badge-suspended">ล้มเหลว</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-muted small">{{ c.created_at }}</td>
+                        <td class="text-end">
+                            <div class="btn-group btn-group-sm">
+                                {% if c.excel_filename and c.status == 'success' %}
+                                <a href="{{ url_for('download_file', filename=c.excel_filename) }}" class="btn btn-outline-success" title="ดาวน์โหลดไฟล์ Excel">
+                                    <i class="bi bi-download"></i>
+                                </a>
+                                {% endif %}
+                                <button type="button" class="btn btn-outline-danger" onclick="confirmDeleteSingle({{ c.id }}, '{{ c.original_filename|replace('\'', '\\\'') }}')" title="ลบประวัติรายการนี้">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="8" class="text-center py-4 text-muted">ไม่พบประวัติการแปลงไฟล์ตามเงื่อนไขที่เลือก</td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function changeMonthFilter(month) {
+        if (month) {
+            window.location.href = `/admin?month=${encodeURIComponent(month)}`;
+        } else {
+            window.location.href = '/admin';
+        }
+    }
+
+    function toggleSelectAll(master) {
+        const checkboxes = document.querySelectorAll('.conv-item-check');
+        checkboxes.forEach(cb => cb.checked = master.checked);
+        handleItemCheck();
+    }
+
+    function handleItemCheck() {
+        const checked = document.querySelectorAll('.conv-item-check:checked');
+        const batchBtn = document.getElementById('batchDeleteBtn');
+        const countBadge = document.getElementById('selectedCountBadge');
+        const master = document.getElementById('checkAllConversions');
+        const total = document.querySelectorAll('.conv-item-check').length;
+
+        if (countBadge) countBadge.textContent = checked.length;
+        if (batchBtn) {
+            if (checked.length > 0) {
+                batchBtn.classList.remove('d-none');
+            } else {
+                batchBtn.classList.add('d-none');
+            }
+        }
+        if (master) {
+            master.checked = total > 0 && checked.length === total;
+        }
+    }
+
+    async function confirmDeleteSingle(logId, fileName) {
+        const result = await Swal.fire({
+            title: 'ยืนยันการลบประวัตินี้?',
+            html: `คุณต้องการลบประวัติไฟล์ <strong>${fileName}</strong> หรือไม่?<br><small class="text-danger">*ข้อมูลสกัดและไฟล์ Excel ที่เกี่ยวข้องจะถูกลบออกจากระบบ</small>`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#dc3545',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: '<i class="bi bi-trash me-1"></i> ลบรายการนี้',
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (result.isConfirmed) {
+            try {
+                const response = await fetch(`/admin/conversions/delete/${logId}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (data.success) {
+                    await Swal.fire({
+                        icon: 'success',
+                        title: 'ลบสำเร็จ',
+                        text: data.message,
+                        timer: 1200,
+                        showConfirmButton: false
+                    });
+                    location.reload();
+                } else {
+                    Swal.fire({ icon: 'error', title: 'ผิดพลาด', text: data.message });
+                }
+            } catch (err) {
+                Swal.fire({ icon: 'error', text: err.message });
+            }
+        }
+    }
+
+    async function confirmBatchDelete() {
+        const checked = document.querySelectorAll('.conv-item-check:checked');
+        const ids = Array.from(checked).map(cb => parseInt(cb.value));
+        if (ids.length === 0) {
+            Swal.fire({ icon: 'info', text: 'กรุณาเลือกรายการที่ต้องการลบก่อน' });
+            return;
+        }
+
+        const result = await Swal.fire({
+            title: `ยืนยันการลบ ${ids.length} รายการ?`,
+            html: `คุณต้องการลบประวัติการแปลงไฟล์ที่เลือกทั้งหมด <strong>${ids.length}</strong> รายการ ใช่หรือไม่?<br><small class="text-danger">*ไฟล์เอกสารและข้อมูลผลลัพธ์จะถูกลบออกถาวร</small>`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#dc3545',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: `<i class="bi bi-trash me-1"></i> ใช่, ลบ ${ids.length} รายการ!`,
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (result.isConfirmed) {
+            try {
+                const response = await fetch('/admin/conversions/delete-batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ log_ids: ids })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    await Swal.fire({
+                        icon: 'success',
+                        title: 'ลบสำเร็จ',
+                        text: data.message,
+                        timer: 1500,
+                        showConfirmButton: false
+                    });
+                    location.reload();
+                } else {
+                    Swal.fire({ icon: 'error', title: 'ผิดพลาด', text: data.message });
+                }
+            } catch (err) {
+                Swal.fire({ icon: 'error', text: err.message });
+            }
+        }
+    }
+
+    async function toggleUserStatus(userId, username, currentStatus) {
+        const actionText = currentStatus === 'active' ? 'ระงับการใช้งาน' : 'เปิดใช้งาน';
+        const confirmColor = currentStatus === 'active' ? '#d33' : '#0e9f6e';
+
+        const result = await Swal.fire({
+            title: `ยืนยันการ${actionText}?`,
+            text: `คุณต้องการ${actionText}บัญชีผู้ใช้ "${username}" หรือไม่?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: confirmColor,
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: `ใช่, ${actionText}!`,
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (result.isConfirmed) {
+            try {
+                const response = await fetch(`/admin/users/toggle/${userId}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (data.success) {
+                    await Swal.fire({
+                        icon: 'success',
+                        title: 'สำเร็จ',
+                        text: data.message,
+                        timer: 1500,
+                        showConfirmButton: false
+                    });
+                    location.reload();
+                } else {
+                    Swal.fire({ icon: 'error', text: data.message });
+                }
+            } catch (err) {
+                Swal.fire({ icon: 'error', text: err.message });
+            }
+        }
+    }
+</script>
+{% endblock %}

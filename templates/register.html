@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+
+{% block title %}สมัครสมาชิก - PDF to Excel System{% endblock %}
+
+{% block extra_css %}
+<style>
+    .plan-card {
+        border: 2px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 16px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        background-color: #ffffff;
+        position: relative;
+    }
+    .plan-card:hover {
+        border-color: var(--primary-color);
+        transform: translateY(-2px);
+    }
+    .plan-card.selected {
+        border-color: var(--primary-color);
+        background-color: #eff6ff;
+    }
+    .plan-radio {
+        position: absolute;
+        top: 15px;
+        right: 15px;
+    }
+    .badge-discount {
+        font-size: 0.75rem;
+        background-color: #fef08a;
+        color: #854d0e;
+        border-radius: 4px;
+        padding: 2px 6px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center my-4">
+    <div class="col-lg-8 col-md-10">
+        <div class="card shadow-lg p-4 p-md-5">
+            <div class="text-center mb-4">
+                <div class="d-inline-flex align-items-center justify-content-center bg-primary bg-opacity-10 text-primary rounded-circle mb-3" style="width: 70px; height: 70px;">
+                    <i class="bi bi-person-plus fs-1"></i>
+                </div>
+                <h3 class="fw-bold mb-1">สมัครสมาชิกใช้งานระบบ</h3>
+                <p class="text-muted">เลือกระยะเวลาการใช้งานที่ต้องการ และกรอกข้อมูลเพื่อขอรับสิทธิ์เข้าใช้งาน</p>
+            </div>
+
+            <form method="POST" action="{{ url_for('register') }}" id="registerForm">
+                <!-- Select Package / Plan -->
+                <div class="mb-4">
+                    <label class="form-label fw-bold fs-6 mb-3">
+                        <i class="bi bi-tags text-primary me-1"></i> เลือกแพ็กเกจการใช้งาน (เช่าใช้ หรือ ซื้อขาด):
+                    </label>
+
+                    <div class="row g-3">
+                        <!-- 1 Month -->
+                        <div class="col-md-6 col-lg-4">
+                            <div class="plan-card selected" onclick="selectPlan('rental_1m', this)">
+                                <input class="form-check-input plan-radio" type="radio" name="plan_type" id="plan_1m" value="rental_1m" checked>
+                                <div class="fw-bold text-dark">เช่า 1 เดือน</div>
+                                <div class="fs-4 fw-bold text-primary my-1">3,000 <small class="fs-6 fw-normal text-muted">บ.</small></div>
+                                <div class="text-muted small">อายุการใช้งาน 30 วัน</div>
+                            </div>
+                        </div>
+
+                        <!-- 3 Months -->
+                        <div class="col-md-6 col-lg-4">
+                            <div class="plan-card" onclick="selectPlan('rental_3m', this)">
+                                <input class="form-check-input plan-radio" type="radio" name="plan_type" id="plan_3m" value="rental_3m">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span class="fw-bold text-dark">เช่า 3 เดือน</span>
+                                    <span class="badge-discount">ประหยัด 300.-</span>
+                                </div>
+                                <div class="fs-4 fw-bold text-primary my-1">8,700 <small class="fs-6 fw-normal text-muted">บ.</small></div>
+                                <div class="text-muted small">อายุการใช้งาน 90 วัน</div>
+                            </div>
+                        </div>
+
+                        <!-- 6 Months -->
+                        <div class="col-md-6 col-lg-4">
+                            <div class="plan-card" onclick="selectPlan('rental_6m', this)">
+                                <input class="form-check-input plan-radio" type="radio" name="plan_type" id="plan_6m" value="rental_6m">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span class="fw-bold text-dark">เช่า 6 เดือน</span>
+                                    <span class="badge-discount">ประหยัด 2,000.-</span>
+                                </div>
+                                <div class="fs-4 fw-bold text-primary my-1">16,000 <small class="fs-6 fw-normal text-muted">บ.</small></div>
+                                <div class="text-muted small">อายุการใช้งาน 180 วัน</div>
+                            </div>
+                        </div>
+
+                        <!-- 1 Year -->
+                        <div class="col-md-6 col-lg-6">
+                            <div class="plan-card" onclick="selectPlan('rental_1y', this)">
+                                <input class="form-check-input plan-radio" type="radio" name="plan_type" id="plan_1y" value="rental_1y">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span class="fw-bold text-dark">เช่า 1 ปี (12 เดือน)</span>
+                                    <span class="badge bg-success text-white">สุดคุ้ม ประหยัด 11,000.-</span>
+                                </div>
+                                <div class="fs-4 fw-bold text-success my-1">25,000 <small class="fs-6 fw-normal text-muted">บ.</small></div>
+                                <div class="text-muted small">อายุการใช้งาน 365 วัน (เฉลี่ยเพียง ~2,083 บ./เดือน)</div>
+                            </div>
+                        </div>
+
+                        <!-- Lifetime / ซื้อขาด -->
+                        <div class="col-md-6 col-lg-6">
+                            <div class="plan-card" onclick="selectPlan('lifetime', this)">
+                                <input class="form-check-input plan-radio" type="radio" name="plan_type" id="plan_lifetime" value="lifetime">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span class="fw-bold text-dark">ซื้อขาด (Lifetime)</span>
+                                    <span class="badge bg-dark text-white">ตลอดชีพ</span>
+                                </div>
+                                <div class="fs-4 fw-bold text-dark my-1">สิทธิ์ถาวร</div>
+                                <div class="text-muted small">ไม่มีวันหมดอายุ ใช้งานได้ตลอดไป</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <hr class="my-4">
+
+                <!-- Account Information -->
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label small fw-medium">ชื่อผู้ใช้งาน (Username) <span class="text-danger">*</span></label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-light"><i class="bi bi-person"></i></span>
+                            <input type="text" name="username" class="form-control" placeholder="เช่น somchai" required>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label small fw-medium">ชื่อ - นามสกุล หรือชื่อบริษัท/ร้าน <span class="text-danger">*</span></label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-light"><i class="bi bi-card-text"></i></span>
+                            <input type="text" name="full_name" class="form-control" placeholder="เช่น นายสมชาย ใจดี" required>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label small fw-medium">รหัสผ่าน (Password) <span class="text-danger">*</span></label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-light"><i class="bi bi-lock"></i></span>
+                            <input type="password" name="password" id="regPassword" class="form-control" placeholder="อย่างน้อย 4 ตัวอักษร" required>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label small fw-medium">ยืนยันรหัสผ่าน <span class="text-danger">*</span></label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-light"><i class="bi bi-lock-fill"></i></span>
+                            <input type="password" name="confirm_password" id="regConfirmPassword" class="form-control" placeholder="กรอกรหัสผ่านซ้ำอีกครั้ง" required>
+                        </div>
+                    </div>
+
+                    <div class="col-12">
+                        <label class="form-label small fw-medium">เบอร์โทรศัพท์ หรือ LINE ID สำหรับติดต่อ</label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-light"><i class="bi bi-telephone"></i></span>
+                            <input type="text" name="phone" class="form-control" placeholder="เช่น 081-234-5678 หรือ line: somchai_id">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="alert alert-warning d-flex align-items-center mt-4 small" role="alert">
+                    <i class="bi bi-info-circle-fill fs-5 me-2 flex-shrink-0"></i>
+                    <div>
+                        เมื่อกดสมัครสมาชิกแล้ว ระบบจะส่งคำขอไปยัง <strong>ผู้ดูแลระบบ (Admin)</strong> เพื่อตรวจสอบและกดอนุมัติสิทธิ์การใช้งานก่อนเข้าสู่ระบบครับ
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-lg w-100 py-2 mt-2">
+                    <i class="bi bi-send-check me-1"></i> ยืนยันการสมัครสมาชิก
+                </button>
+
+                <div class="text-center mt-3 pt-3 border-top">
+                    <span class="text-muted small">มีบัญชีอยู่แล้ว?</span>
+                    <a href="{{ url_for('login') }}" class="small fw-bold text-primary text-decoration-none ms-1">
+                        เข้าสู่ระบบที่นี่
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function selectPlan(planValue, element) {
+        document.querySelectorAll('.plan-card').forEach(card => card.classList.remove('selected'));
+        element.classList.add('selected');
+        const radio = element.querySelector('.plan-radio');
+        if (radio) radio.checked = true;
+    }
+
+    document.getElementById('registerForm').addEventListener('submit', function(e) {
+        const pass = document.getElementById('regPassword').value;
+        const confirm = document.getElementById('regConfirmPassword').value;
+
+        if (pass !== confirm) {
+            e.preventDefault();
+            Swal.fire({
+                icon: 'warning',
+                title: 'รหัสผ่านไม่ตรงกัน',
+                text: 'กรุณากรอกรหัสผ่านและยืนยันรหัสผ่านให้ตรงกันครับ'
+            });
+            return;
+        }
+
+        if (pass.length < 4) {
+            e.preventDefault();
+            Swal.fire({
+                icon: 'warning',
+                title: 'รหัสผ่านสั้นเกินไป',
+                text: 'รหัสผ่านต้องมีความยาวอย่างน้อย 4 ตัวอักษรครับ'
+            });
+            return;
+        }
+    });
+</script>
+{% endblock %}

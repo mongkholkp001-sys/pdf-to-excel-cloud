@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.bat
+*.exe
+outputs/
+uploads/
+*.zip
+.env
+.DS_Store
+instance/
+database.db

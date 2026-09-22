@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+
+{% block title %}ตั้งค่าระบบ & Gemini AI - Enterprise Edition{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <!-- Breadcrumb -->
+            <nav aria-label="breadcrumb" class="mb-3">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{{ url_for('admin_dashboard') }}" class="text-decoration-none">แดชบอร์ด</a></li>
+                    <li class="breadcrumb-item active">ตั้งค่า Enterprise AI (Google Gemini)</li>
+                </ol>
+            </nav>
+
+            <!-- Card Settings -->
+            <div class="card shadow-sm border-0 rounded-4 mb-4">
+                <div class="card-header bg-dark text-white p-4 rounded-top-4 d-flex align-items-center justify-content-between">
+                    <div>
+                        <h4 class="mb-1 fw-bold"><i class="bi bi-stars text-warning me-2"></i>ตั้งค่า Enterprise AI Engine</h4>
+                        <p class="mb-0 text-white-50 small">เชื่อมต่อ Google Gemini Multimodal Vision (ตรวจจับโมเดลล่าสุดอัตโนมัติ) เพื่อความแม่นยำระดับ 100%</p>
+                    </div>
+                    {% if current_key %}
+                    <span class="badge bg-success px-3 py-2 fs-6 rounded-pill">
+                        <i class="bi bi-check-circle-fill me-1"></i> AI พร้อมใช้งาน
+                    </span>
+                    {% else %}
+                    <span class="badge bg-warning text-dark px-3 py-2 fs-6 rounded-pill">
+                        <i class="bi bi-exclamation-triangle-fill me-1"></i> ใช้โหมด Local OCR
+                    </span>
+                    {% endif %}
+                </div>
+
+                <div class="card-body p-4">
+                    {% with messages = get_flashed_messages(with_categories=true) %}
+                        {% if messages %}
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{ category }} alert-dismissible fade show rounded-3" role="alert">
+                                    {{ message }}
+                                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                                </div>
+                            {% endfor %}
+                        {% endif %}
+                    {% endwith %}
+
+                    <form method="POST" action="{{ url_for('admin_settings') }}">
+                        <div class="mb-4">
+                            <label for="gemini_api_key" class="form-label fw-bold">
+                                Google Gemini API Key:
+                            </label>
+                            <div class="input-group mb-2">
+                                <span class="input-group-text bg-light"><i class="bi bi-key-fill text-muted"></i></span>
+                                <input type="password" class="form-control font-monospace" id="gemini_api_key" name="gemini_api_key" 
+                                       value="{{ current_key }}" placeholder="วาง AIzaSy... API Key ที่นี่">
+                                <button class="btn btn-outline-secondary" type="button" id="toggleKeyBtn" onclick="toggleKeyVisibility()">
+                                    <i class="bi bi-eye" id="toggleIcon"></i>
+                                </button>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <small class="text-muted">
+                                    คัดลอกจาก Google AI Studio: 
+                                    <a href="https://aistudio.google.com/api-keys?project=debt-osint" target="_blank" class="text-decoration-none fw-bold">
+                                        เปิดรับ API Key ที่นี่ <i class="bi bi-box-arrow-up-right"></i>
+                                    </a>
+                                </small>
+                                <button type="button" class="btn btn-outline-primary btn-sm rounded-pill" onclick="testConnection()">
+                                    <i class="bi bi-broadcast me-1"></i> ทดสอบการเชื่อมต่อ
+                                </button>
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+
+                        <div class="d-flex justify-content-between align-items-center">
+                            <a href="{{ url_for('admin_dashboard') }}" class="btn btn-light rounded-3 px-4">
+                                <i class="bi bi-arrow-left me-1"></i> ย้อนกลับ
+                            </a>
+                            <button type="submit" class="btn btn-success rounded-3 px-4 fw-bold shadow-sm">
+                                <i class="bi bi-save2 me-1"></i> บันทึกการตั้งค่า
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Info Guide Card -->
+            <div class="card border-0 bg-white shadow-sm rounded-4">
+                <div class="card-body p-4">
+                    <h5 class="fw-bold mb-3"><i class="bi bi-info-circle text-primary me-2"></i>ข้อดีของ Gemini 1.5 Flash สำหรับระบบ ท.ร.</h5>
+                    <ul class="list-unstyled mb-0">
+                        <li class="mb-2 d-flex align-items-start">
+                            <i class="bi bi-check2-circle text-success fs-5 me-2 mt-n1"></i>
+                            <div><strong>อ่านทะลุตราประทับและลายเซ็น 100%:</strong> ตราประทับนายทะเบียนสีน้ำเงิน ลายน้ำ หรือหมึกเปื้อน AI สามารถมองทะลุและอ่านข้อความที่ซ่อนอยู่ข้างหลังได้อย่างชัดเจน</div>
+                        </li>
+                        <li class="mb-2 d-flex align-items-start">
+                            <i class="bi bi-check2-circle text-success fs-5 me-2 mt-n1"></i>
+                            <div><strong>สกัดชื่อบิดา/มารดาได้แม่นยำ:</strong> AI เข้าใจภาษาไทย จึงคัดเฉพาะชื่อจริงโดยไม่มีคำว่า "มารดาชื่อ", "บิดาชื่อ", "สัญชาติ" ปะปนมาแน่นอน</div>
+                        </li>
+                        <li class="mb-2 d-flex align-items-start">
+                            <i class="bi bi-check2-circle text-success fs-5 me-2 mt-n1"></i>
+                            <div><strong>ฟรี 1,500 หน้าต่อวัน:</strong> Google AI Studio ให้โควต้าฟรี 15 ครั้ง/นาที และ 1,500 หน้า/วัน สำหรับการใช้งานทั่วไปแทบไม่มีค่าใช้จ่ายเลย</div>
+                        </li>
+                        <li class="d-flex align-items-start">
+                            <i class="bi bi-shield-check text-primary fs-5 me-2 mt-n1"></i>
+                            <div><strong>ระบบสำรอง 2 ชั้น:</strong> หากวันไหนไม่ได้ต่อเน็ตหรือ API Key มีปัญหา ระบบจะสลับไปใช้เอนจิน Local OCR ในเครื่องให้อัตโนมัติ งานไม่สะดุด</div>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function toggleKeyVisibility() {
+    const input = document.getElementById('gemini_api_key');
+    const icon = document.getElementById('toggleIcon');
+    if (input.type === 'password') {
+        input.type = 'text';
+        icon.classList.remove('bi-eye');
+        icon.classList.add('bi-eye-slash');
+    } else {
+        input.type = 'password';
+        icon.classList.remove('bi-eye-slash');
+        icon.classList.add('bi-eye');
+    }
+}
+
+function testConnection() {
+    const key = document.getElementById('gemini_api_key').value.trim();
+    if (!key) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'กรุณากรอก API Key',
+            text: 'กรุณาวาง Gemini API Key ก่อนทำการทดสอบครับ'
+        });
+        return;
+    }
+
+    Swal.fire({
+        title: 'กำลังทดสอบเชื่อมต่อ...',
+        text: 'กำลังตรวจสอบความถูกต้องและค้นหาโมเดล Gemini ล่าสุดที่รองรับ...',
+        allowOutsideClick: false,
+        didOpen: () => {
+            Swal.showLoading();
+        }
+    });
+
+    fetch('/api/test-gemini', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({api_key: key})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            Swal.fire({
+                icon: 'success',
+                title: 'เชื่อมต่อสำเร็จ 100%!',
+                text: data.message,
+                confirmButtonColor: '#0e9f6e'
+            });
+        } else {
+            Swal.fire({
+                icon: 'error',
+                title: 'เชื่อมต่อไม่สำเร็จ',
+                text: data.message,
+                confirmButtonColor: '#e02424'
+            });
+        }
+    })
+    .catch(err => {
+        Swal.fire({
+            icon: 'error',
+            title: 'เกิดข้อผิดพลาด',
+            text: err.toString()
+        });
+    });
+}
+</script>
+{% endblock %}

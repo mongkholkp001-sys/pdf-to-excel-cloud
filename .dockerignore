@@ -1,0 +1,12 @@
+.git
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.bat
+*.exe
+outputs/*
+uploads/*
+*.zip
+.env
+.DS_Store
