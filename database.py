@@ -132,18 +132,18 @@ def init_db():
     ''')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_devices ON user_devices(user_id, mac_address, is_active)')
     
-    # Ensure Admin account exists with password: '2512044'
-    cursor.execute("SELECT * FROM users WHERE username = 'admin'")
-    admin_row = cursor.fetchone()
+    # Ensure Admin account exists with password: '2512044' (Atomic upsert safe for multi-worker Gunicorn)
     admin_pass = generate_password_hash('2512044')
-    if not admin_row:
+    try:
         cursor.execute('''
             INSERT INTO users (username, password_hash, full_name, role, status, plan_type, plan_name, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash
         ''', ('admin', admin_pass, 'ผู้ดูแลระบบ (Admin)', 'admin', 'active', 'lifetime', 'ผู้ดูแลระบบ', datetime.now()))
-        print("Admin user created with password '2512044'.")
-    else:
-        cursor.execute("UPDATE users SET password_hash = ? WHERE username = 'admin'", (admin_pass,))
+    except sqlite3.IntegrityError:
+        pass
+    except Exception as e:
+        print(f"Admin setup warning: {e}")
         
     conn.commit()
     conn.close()

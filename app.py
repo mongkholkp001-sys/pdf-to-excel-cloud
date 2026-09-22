@@ -23,8 +23,11 @@ OUTPUT_FOLDER = os.path.join(BASE_DIR, 'outputs')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-# Initialize Database
-database.init_db()
+# Initialize Database safely
+try:
+    database.init_db()
+except Exception as e:
+    print(f"[Database Init] {e}")
 
 # Decorators
 def login_required(f):
