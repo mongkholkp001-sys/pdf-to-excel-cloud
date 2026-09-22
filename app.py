@@ -527,7 +527,7 @@ def admin_settings():
         flash('บันทึกการตั้งค่า Google Gemini API Key เรียบร้อยแล้ว', 'success')
         return redirect(url_for('admin_settings'))
         
-    current_key = database.get_setting('gemini_api_key', '')
+    current_key = database.get_setting('gemini_api_key', '') or os.environ.get('GEMINI_API_KEY', '')
     masked_key = ''
     if current_key:
         if len(current_key) > 8:
