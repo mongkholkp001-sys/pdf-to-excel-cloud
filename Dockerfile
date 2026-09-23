@@ -33,4 +33,4 @@ RUN mkdir -p /app/uploads /app/outputs /app/data /app/tessdata
 EXPOSE 8080
 
 # Run with Gunicorn Production WSGI server
-CMD exec gunicorn --bind 0.0.0.0:${PORT} --workers 2 --threads 8 --timeout 300 app:app
+CMD exec gunicorn --bind 0.0.0.0:${PORT} --workers 1 --threads 8 --timeout 300 app:app

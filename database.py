@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import re
 from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -7,6 +8,54 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_DIR = os.environ.get('DB_DIR', BASE_DIR)
 os.makedirs(DB_DIR, exist_ok=True)
 DB_PATH = os.path.join(DB_DIR, 'system.db')
+DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
+USE_POSTGRES = DATABASE_URL.startswith(('postgres://', 'postgresql://'))
+
+if USE_POSTGRES:
+    import psycopg2
+    from psycopg2.extras import DictCursor
+    from psycopg2 import IntegrityError as PostgresIntegrityError
+else:
+    psycopg2 = None
+    PostgresIntegrityError = ()
+
+INTEGRITY_ERRORS = (sqlite3.IntegrityError,) + ((PostgresIntegrityError,) if USE_POSTGRES else ())
+
+class _PgCursorCompat:
+    """Small compatibility layer so the existing qmark SQL can run on PostgreSQL."""
+    def __init__(self, cursor):
+        self._cursor = cursor
+        self.lastrowid = None
+
+    def execute(self, sql, params=None):
+        params = params or ()
+        # SQLite month expression -> PostgreSQL equivalent.
+        sql = re.sub(r"strftime\('%Y-%m',\s*([^\)]+)\)", r"to_char(\1, 'YYYY-MM')", sql)
+        sql = sql.replace('status = "pending"', "status = 'pending'")
+        sql = sql.replace('is_active = 1', 'is_active = TRUE').replace('is_active = 0', 'is_active = FALSE')
+        sql = sql.replace('?', '%s')
+        # Preserve cursor.lastrowid behavior for the two inserts that use it.
+        wants_id = bool(re.match(r'\s*INSERT\s+INTO\s+(conversion_logs|user_devices)\b', sql, re.I))
+        if wants_id and 'RETURNING' not in sql.upper():
+            sql = sql.rstrip().rstrip(';') + ' RETURNING id'
+        self._cursor.execute(sql, params)
+        if wants_id:
+            row = self._cursor.fetchone()
+            self.lastrowid = row[0] if row else None
+        return self
+
+    def fetchone(self): return self._cursor.fetchone()
+    def fetchall(self): return self._cursor.fetchall()
+    @property
+    def rowcount(self): return self._cursor.rowcount
+    def __iter__(self): return iter(self._cursor)
+
+class _PgConnCompat:
+    def __init__(self, conn): self._conn = conn
+    def cursor(self): return _PgCursorCompat(self._conn.cursor(cursor_factory=DictCursor))
+    def commit(self): return self._conn.commit()
+    def rollback(self): return self._conn.rollback()
+    def close(self): return self._conn.close()
 
 PLANS = {
     'rental_1m': {'name': 'เช่า 1 เดือน (3,000 บาท)', 'price': 3000, 'days': 30},
@@ -17,134 +66,76 @@ PLANS = {
 }
 
 def get_db():
+    if USE_POSTGRES:
+        url = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+        return _PgConnCompat(psycopg2.connect(url, connect_timeout=10))
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.execute('PRAGMA journal_mode=WAL;')
     conn.execute('PRAGMA busy_timeout=10000;')
+    conn.execute('PRAGMA foreign_keys=ON;')
     conn.row_factory = sqlite3.Row
     return conn
 
 def init_db():
     conn = get_db()
     cursor = conn.cursor()
-    
-    # Table: users
-    cursor.execute('''
+
+    id_def = 'BIGSERIAL PRIMARY KEY' if USE_POSTGRES else 'INTEGER PRIMARY KEY AUTOINCREMENT'
+    bool_def = 'BOOLEAN DEFAULT TRUE' if USE_POSTGRES else 'INTEGER DEFAULT 1'
+
+    cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            full_name TEXT NOT NULL,
-            phone TEXT,
-            plan_type TEXT DEFAULT 'lifetime',
-            plan_name TEXT DEFAULT 'ซื้อขาด',
-            role TEXT NOT NULL DEFAULT 'user', -- 'admin' or 'user'
-            status TEXT NOT NULL DEFAULT 'active', -- 'active', 'pending', 'suspended', 'expired'
-            expires_at DATETIME,
-            approved_at DATETIME,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            last_login DATETIME
+            id {id_def}, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
+            full_name TEXT NOT NULL, phone TEXT, plan_type TEXT DEFAULT 'lifetime',
+            plan_name TEXT DEFAULT 'ซื้อขาด', role TEXT NOT NULL DEFAULT 'user',
+            status TEXT NOT NULL DEFAULT 'active', expires_at TIMESTAMP, approved_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, last_login TIMESTAMP
         )
-    ''')
-    
-    # Migration: Add columns if they do not exist
-    cursor.execute("PRAGMA table_info(users)")
-    cols = [col[1] for col in cursor.fetchall()]
-    if 'phone' not in cols:
-        cursor.execute("ALTER TABLE users ADD COLUMN phone TEXT")
-    if 'plan_type' not in cols:
-        cursor.execute("ALTER TABLE users ADD COLUMN plan_type TEXT DEFAULT 'lifetime'")
-    if 'plan_name' not in cols:
-        cursor.execute("ALTER TABLE users ADD COLUMN plan_name TEXT DEFAULT 'ซื้อขาด'")
-    if 'expires_at' not in cols:
-        cursor.execute("ALTER TABLE users ADD COLUMN expires_at DATETIME")
-    if 'approved_at' not in cols:
-        cursor.execute("ALTER TABLE users ADD COLUMN approved_at DATETIME")
-        
-    # Table: conversion_logs
-    cursor.execute('''
+    """)
+    cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS conversion_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            original_filename TEXT NOT NULL,
-            stored_filename TEXT NOT NULL,
-            page_count INTEGER NOT NULL DEFAULT 0,
-            row_count INTEGER NOT NULL DEFAULT 0,
-            excel_filename TEXT,
-            status TEXT NOT NULL DEFAULT 'success',
-            ip_address TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+            id {id_def}, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            original_filename TEXT NOT NULL, stored_filename TEXT NOT NULL,
+            page_count INTEGER NOT NULL DEFAULT 0, row_count INTEGER NOT NULL DEFAULT 0,
+            excel_filename TEXT, status TEXT NOT NULL DEFAULT 'success', ip_address TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-    ''')
-    
-    # Table: extracted_records
-    cursor.execute('''
+    """)
+    cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS extracted_records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            conversion_id INTEGER NOT NULL,
-            page_number INTEGER NOT NULL,
-            cid TEXT,
-            hid TEXT,
-            title TEXT,
-            fname TEXT,
-            lname TEXT,
-            full_name TEXT,
-            gender TEXT,
-            dob TEXT,
-            age TEXT,
-            status TEXT,
-            mother_name TEXT,
-            mother_cid TEXT,
-            father_name TEXT,
-            father_cid TEXT,
-            address TEXT,
-            subdistrict TEXT,
-            district TEXT,
-            province TEXT,
-            reg_office TEXT,
-            move_date TEXT,
-            person_status TEXT,
-            issue_office TEXT,
-            print_date TEXT,
-            FOREIGN KEY (conversion_id) REFERENCES conversion_logs (id) ON DELETE CASCADE
+            id {id_def}, conversion_id INTEGER NOT NULL REFERENCES conversion_logs(id) ON DELETE CASCADE,
+            page_number INTEGER NOT NULL, cid TEXT, hid TEXT, title TEXT, fname TEXT, lname TEXT,
+            full_name TEXT, gender TEXT, dob TEXT, age TEXT, status TEXT, mother_name TEXT,
+            mother_cid TEXT, father_name TEXT, father_cid TEXT, address TEXT, subdistrict TEXT,
+            district TEXT, province TEXT, reg_office TEXT, move_date TEXT, person_status TEXT,
+            issue_office TEXT, print_date TEXT
         )
-    ''')
-    
-    # Table: user_devices (ตรวจจับและบันทึก MAC Address สูงสุด 3 เครื่องต่อบัญชี)
-    cursor.execute('''
+    """)
+    cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS user_devices (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            mac_address TEXT NOT NULL,
-            device_name TEXT,
-            registered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-            is_active INTEGER DEFAULT 1,
-            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+            id {id_def}, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            mac_address TEXT NOT NULL, device_name TEXT, registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP, is_active {bool_def}
         )
-    ''')
-    cursor.execute('''
+    """)
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS system_settings (
-            key TEXT PRIMARY KEY,
-            value TEXT,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-    ''')
+    """)
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_devices ON user_devices(user_id, mac_address, is_active)')
-    
-    # Ensure Admin account exists with password: '2512044' (Atomic upsert safe for multi-worker Gunicorn)
-    admin_pass = generate_password_hash('2512044')
-    try:
-        cursor.execute('''
+
+    # Create the initial admin only when it does not already exist. Never reset its password on restart.
+    cursor.execute("SELECT * FROM users WHERE username = 'admin'")
+    if not cursor.fetchone():
+        initial_admin_password = os.environ.get('ADMIN_INITIAL_PASSWORD', '2512044')
+        admin_pass = generate_password_hash(initial_admin_password)
+        cursor.execute("""
             INSERT INTO users (username, password_hash, full_name, role, status, plan_type, plan_name, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash
-        ''', ('admin', admin_pass, 'ผู้ดูแลระบบ (Admin)', 'admin', 'active', 'lifetime', 'ผู้ดูแลระบบ', datetime.now()))
-    except sqlite3.IntegrityError:
-        pass
-    except Exception as e:
-        print(f"Admin setup warning: {e}")
-        
+        """, ('admin', admin_pass, 'ผู้ดูแลระบบ (Admin)', 'admin', 'active', 'lifetime', 'ผู้ดูแลระบบ', datetime.now()))
+        print('Initial admin user created.')
+
     conn.commit()
     conn.close()
 
@@ -174,7 +165,7 @@ def authenticate_user(username, password):
     # Check expiration date if any
     if user['expires_at']:
         try:
-            exp_date = datetime.fromisoformat(user['expires_at'].replace('Z', ''))
+            exp_date = user['expires_at'] if isinstance(user['expires_at'], datetime) else datetime.fromisoformat(str(user['expires_at']).replace('Z', ''))
             if datetime.now() > exp_date:
                 cursor.execute("UPDATE users SET status = 'expired' WHERE id = ?", (user['id'],))
                 conn.commit()
@@ -198,7 +189,7 @@ def register_user(username, password, full_name, phone, plan_type):
         ''', (username, pw_hash, full_name, phone, plan_type, plan_info['name'], datetime.now()))
         conn.commit()
         return True, "สมัครสมาชิกเรียบร้อยแล้ว บัญชีของคุณอยู่ระหว่างรอผู้ดูแลระบบอนุมัติการใช้งาน"
-    except sqlite3.IntegrityError:
+    except INTEGRITY_ERRORS:
         return False, "ชื่อผู้ใช้นี้มีอยู่ในระบบแล้ว กรุณาเลือกชื่อผู้ใช้อื่น"
     except Exception as e:
         return False, str(e)
@@ -253,7 +244,7 @@ def extend_subscription(user_id, days=30, plan_type=None):
     current_exp = None
     if user['expires_at']:
         try:
-            current_exp = datetime.fromisoformat(user['expires_at'].replace('Z', ''))
+            current_exp = user['expires_at'] if isinstance(user['expires_at'], datetime) else datetime.fromisoformat(str(user['expires_at']).replace('Z', ''))
         except Exception:
             pass
             
@@ -327,7 +318,7 @@ def create_user(username, password, full_name, role='user', plan_type='lifetime'
         ''', (username, pw_hash, full_name, phone, plan_type, plan_info['name'], role, expires_at, datetime.now(), datetime.now()))
         conn.commit()
         return True, "สร้างผู้ใช้งานสำเร็จ"
-    except sqlite3.IntegrityError:
+    except INTEGRITY_ERRORS:
         return False, "ชื่อผู้ใช้นี้มีอยู่ในระบบแล้ว"
     except Exception as e:
         return False, str(e)
@@ -695,8 +686,8 @@ def register_user_device(user_id, mac_address, device_name=None, max_devices=MAX
     name = device_name or f"เครื่องที่ {active_count + 1}"
     cursor.execute('''
         INSERT INTO user_devices (user_id, mac_address, device_name, registered_at, last_seen, is_active)
-        VALUES (?, ?, ?, ?, ?, 1)
-    ''', (user_id, norm_mac, name, now_str, now_str))
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (user_id, norm_mac, name, now_str, now_str, True))
     dev_id = cursor.lastrowid
     conn.commit()
     conn.close()
@@ -739,7 +730,7 @@ def revoke_user_device(device_id):
     """ถอดสิทธิ์เครื่อง (ตั้ง is_active = 0) เพื่อคืนโควต้าสล็อตเครื่องให้ User"""
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute('UPDATE user_devices SET is_active = 0 WHERE id = ?', (device_id,))
+    cursor.execute('UPDATE user_devices SET is_active = ? WHERE id = ?', (False, device_id))
     updated = cursor.rowcount
     conn.commit()
     conn.close()
@@ -749,7 +740,7 @@ def reset_all_user_devices(user_id):
     """รีเซ็ตสิทธิ์อุปกรณ์ทั้งหมดของ User (คืนโควต้าครบ 3 เครื่อง)"""
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute('UPDATE user_devices SET is_active = 0 WHERE user_id = ?', (user_id,))
+    cursor.execute('UPDATE user_devices SET is_active = ? WHERE user_id = ?', (False, user_id))
     updated = cursor.rowcount
     conn.commit()
     conn.close()

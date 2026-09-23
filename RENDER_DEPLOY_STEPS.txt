@@ -1,0 +1,16 @@
+PDF to Excel Cloud Edition - Render deployment notes
+
+Required Render environment variables:
+1) SECRET_KEY = a long random value (keep the same value permanently)
+2) DATABASE_URL = Internal Database URL from the Render PostgreSQL database
+3) ADMIN_INITIAL_PASSWORD = initial admin password; used only if admin does not yet exist
+4) GEMINI_API_KEY = existing Gemini key (if used)
+
+Important:
+- The app now uses PostgreSQL whenever DATABASE_URL is present.
+- If DATABASE_URL is absent, it falls back to local SQLite for local development only.
+- Admin password is no longer reset on every application restart.
+- Gunicorn uses one worker because conversion progress is currently stored in process memory.
+- Uploaded PDFs and generated Excel files remain temporary on Render. Persistent user/history/settings data is in PostgreSQL.
+
+If old system.db data must be copied to PostgreSQL, run migrate_sqlite_to_postgres.py once with DATABASE_URL set.

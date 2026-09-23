@@ -1,0 +1,471 @@
+{% extends "base.html" %}
+
+{% block title %}แปลงไฟล์ PDF เป็น Excel{% endblock %}
+
+{% block extra_css %}
+<style>
+    .drop-zone {
+        border: 2px dashed #cbd5e1;
+        border-radius: 12px;
+        padding: 40px 20px;
+        text-align: center;
+        background-color: #ffffff;
+        transition: all 0.2s ease;
+        cursor: pointer;
+    }
+    .drop-zone:hover, .drop-zone.dragover {
+        border-color: var(--primary-color);
+        background-color: #eff6ff;
+    }
+    .preview-card {
+        display: none;
+    }
+    .table-responsive {
+        max-height: 500px;
+        overflow-y: auto;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-10">
+        <!-- Header -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h3 class="fw-bold mb-1">แปลงไฟล์ PDF ทะเบียนราษฎร เป็น Excel</h3>
+                <p class="text-muted mb-0">ระบบรองรับไฟล์ PDF หลายหน้า โดยประมวลผล <strong>1 หน้า = ข้อมูล 1 แถวใน Excel</strong> อัตโนมัติ</p>
+            </div>
+            <a href="{{ url_for('history') }}" class="btn btn-outline-secondary">
+                <i class="bi bi-clock-history me-1"></i> ประวัติการแปลงไฟล์
+            </a>
+        </div>
+
+                {% if gemini_active %}
+        <div class="alert alert-success d-flex align-items-center justify-content-between py-2 px-3 mb-3 shadow-sm border-0 rounded-4" style="background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);">
+            <div class="d-flex align-items-center">
+                <div class="p-2 rounded-circle bg-success text-white me-3 shadow-sm">
+                    <i class="bi bi-stars fs-5"></i>
+                </div>
+                <div>
+                    <span class="fw-bold text-success fs-6">Enterprise AI Engine (Google Gemini 1.5 Flash) ทำงานอยู่</span>
+                    <p class="mb-0 text-muted small">ระบบใช้ Multimodal Vision AI อ่านทะลุตราประทับ ลายเซ็น และรอยหมึก แม่นยำ 100%</p>
+                </div>
+            </div>
+            <span class="badge bg-success px-3 py-2 rounded-pill shadow-sm">
+                <i class="bi bi-shield-fill-check me-1"></i> ความแม่นยำ 100%
+            </span>
+        </div>
+        {% endif %}
+
+        <!-- Mode Switcher Buttons -->
+        <div class="card mb-4 shadow-sm border-0">
+            <div class="card-body p-2 bg-light rounded-3">
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <button type="button" class="btn w-100 py-3 text-start d-flex align-items-center mode-btn {{ 'btn-primary text-white shadow-sm' if active_doc_type != 'certified' else 'btn-outline-secondary bg-white' }}" id="modeUncertifiedBtn" onclick="switchMode('uncertified')">
+                            <i class="bi bi-file-earmark-text fs-2 me-3 {{ 'text-white' if active_doc_type != 'certified' else 'text-primary' }}" id="iconUncert"></i>
+                            <div>
+                                <div class="fw-bold fs-6">1. แปลงไฟล์แบบไม่รับรอง</div>
+                                <small class="{{ 'text-white-50' if active_doc_type != 'certified' else 'text-muted' }}" id="subUncert">มาตรฐาน ท.ร. 14/1 ทั่วไป (ดิจิทัล & สแกน)</small>
+                            </div>
+                        </button>
+                    </div>
+                    <div class="col-md-6">
+                        <button type="button" class="btn w-100 py-3 text-start d-flex align-items-center mode-btn {{ 'btn-success text-white shadow-sm' if active_doc_type == 'certified' else 'btn-outline-secondary bg-white' }}" id="modeCertifiedBtn" onclick="switchMode('certified')">
+                            <i class="bi bi-award fs-2 me-3 {{ 'text-white' if active_doc_type == 'certified' else 'text-success' }}" id="iconCert"></i>
+                            <div>
+                                <div class="fw-bold fs-6">2. แปลงไฟล์แบบรับรอง</div>
+                                <small class="{{ 'text-white-50' if active_doc_type == 'certified' else 'text-muted' }}" id="subCert">มีตราประทับนายทะเบียน & รับรองรายการ</small>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mode Indicator Banner -->
+        <div class="alert {{ 'alert-primary' if active_doc_type != 'certified' else 'alert-success' }} d-flex align-items-center mb-4 shadow-sm" id="modeBanner">
+            <i class="bi {{ 'bi-info-circle-fill text-primary' if active_doc_type != 'certified' else 'bi-check-circle-fill text-success' }} fs-4 me-3" id="modeBannerIcon"></i>
+            <div>
+                <strong id="modeBannerTitle">{{ 'โหมดปัจจุบัน: แปลงไฟล์แบบไม่รับรอง (มาตรฐาน ท.ร.14/1)' if active_doc_type != 'certified' else 'โหมดปัจจุบัน: แปลงไฟล์แบบรับรอง (มีตราประทับและรับรองรายการ)' }}</strong>
+                <div class="small" id="modeBannerDesc">{{ 'เหมาะสำหรับเอกสารทะเบียนราษฎร ท.ร.14/1 ทั่วไปที่ไม่มีตราประทับรับรองด้านล่าง' if active_doc_type != 'certified' else 'เหมาะสำหรับเอกสารแบบรับรองรายการที่มีตราประทับสีน้ำเงิน ลายเซ็นนายทะเบียน และข้อความรับรองจากฐานข้อมูล' }}</div>
+            </div>
+        </div>
+
+        <!-- Upload Card -->
+        <div class="card p-4 mb-4 shadow-sm">
+            <form id="uploadForm" enctype="multipart/form-data">
+                <input type="hidden" name="doc_type" id="docTypeInput" value="{{ active_doc_type }}">
+                <div class="drop-zone" id="dropZone">
+                    <input type="file" id="pdfFileInput" name="pdf_file" accept=".pdf" class="d-none">
+                    <div class="mb-3">
+                        <i class="bi bi-cloud-arrow-up text-primary" style="font-size: 3.5rem;" id="dropIcon"></i>
+                    </div>
+                    <h5 class="fw-bold mb-2">ลากไฟล์ PDF มาวางที่นี่ หรือคลิกเพื่อเลือกไฟล์</h5>
+                    <p class="text-muted small mb-3" id="dropDesc">รองรับไฟล์เอกสาร PDF ท.ร.14/1 (มีกี่หน้าก็ได้ ระบบอ่าน 1 หน้า = 1 แถว)</p>
+                    <button type="button" class="btn btn-primary px-4" id="selectFileBtn" onclick="document.getElementById('pdfFileInput').click();">
+                        <i class="bi bi-folder2-open me-1"></i> เลือกไฟล์จากเครื่อง
+                    </button>
+                    <div id="selectedFileName" class="mt-3 fw-bold text-success d-none"></div>
+                </div>
+
+                <div class="mt-3 text-end d-none" id="startConvertDiv">
+                    <button type="submit" class="btn btn-success btn-lg px-5 shadow-sm" id="convertBtn">
+                        <i class="bi bi-gear-fill me-1"></i> เริ่มต้นแปลงไฟล์
+                    </button>
+                </div>
+            </form>
+
+            <!-- Loading & Real-time Progress Bar -->
+            <div id="loadingDiv" class="py-4 px-3 d-none">
+                <div class="card border-0 bg-light rounded-4 p-4 shadow-sm">
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="spinner-border text-primary me-3 flex-shrink-0" style="width: 2.5rem; height: 2.5rem;" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <h6 class="fw-bold text-dark mb-0" id="progressStageTitle">กำลังเริ่มต้นการประมวลผล...</h6>
+                                <span class="badge bg-primary fs-6 px-3 py-1 rounded-pill" id="progressBadge">0%</span>
+                            </div>
+                            <div class="small text-muted" id="progressStatusDetail">ระบบกำลังเตรียมการอ่านและสกัดข้อมูลจากไฟล์ PDF...</div>
+                        </div>
+                    </div>
+
+                    <!-- Progress Bar Track -->
+                    <div class="progress shadow-none" style="height: 14px; border-radius: 10px; background-color: #dee2e6;">
+                        <div id="progressBar" 
+                             class="progress-bar progress-bar-striped progress-bar-animated bg-primary" 
+                             role="progressbar" 
+                             style="width: 0%; transition: width 0.3s ease-in-out;" 
+                             aria-valuenow="0" 
+                             aria-valuemin="0" 
+                             aria-valuemax="100">
+                        </div>
+                    </div>
+
+                    <div class="d-flex justify-content-between text-muted small mt-2">
+                        <span><i class="bi bi-cpu text-primary me-1"></i> ระบบ AI OCR & สกัดพิกัดข้อมูลอัตโนมัติ</span>
+                        <span id="progressPageHint" class="fw-medium text-secondary">ประมวลผล 1 หน้า = 1 แถวใน Excel</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Preview Results Card -->
+        <div class="card p-4 shadow-sm preview-card" id="resultCard">
+            <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+                <div>
+                    <h5 class="fw-bold mb-1 text-success">
+                        <i class="bi bi-check-circle-fill me-2"></i> แปลงไฟล์สำเร็จ!
+                    </h5>
+                    <span class="text-muted small" id="summaryText">พบข้อมูลทั้งหมด 0 หน้า (0 แถว)</span>
+                </div>
+                <div>
+                    <a href="#" id="downloadExcelBtn" class="btn btn-success btn-lg shadow-sm">
+                        <i class="bi bi-file-earmark-excel me-1"></i> ดาวน์โหลดไฟล์ Excel (.xlsx)
+                    </a>
+                </div>
+            </div>
+
+            <!-- Search box in preview -->
+            <div class="mb-3">
+                <div class="input-group">
+                    <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
+                    <input type="text" id="tableSearch" class="form-control" placeholder="ค้นหาข้อมูลในตาราง (เช่น ชื่อ, เลขบัตร, จังหวัด)...">
+                </div>
+            </div>
+
+            <!-- Preview Table -->
+            <div class="table-responsive border rounded">
+                <table class="table table-hover table-striped align-middle mb-0 font-sarabun" id="previewTable">
+                    <thead class="table-dark">
+                        <tr>
+                            <th class="text-center">ลำดับ</th>
+                            <th>เลขประจำตัวประชาชน</th>
+                            <th>รหัสประจำบ้าน</th>
+                            <th>ชื่อ - นามสกุล</th>
+                            <th class="text-center">เพศ</th>
+                            <th>เกิดวันที่</th>
+                            <th class="text-center">อายุ</th>
+                            <th class="text-center">สถานภาพ</th>
+                            <th>ที่อยู่ตามทะเบียนบ้าน</th>
+                            <th>สำนักทะเบียน</th>
+                        </tr>
+                    </thead>
+                    <tbody id="previewTableBody">
+                        <!-- Filled by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('pdfFileInput');
+    const selectedFileName = document.getElementById('selectedFileName');
+    const startConvertDiv = document.getElementById('startConvertDiv');
+    const uploadForm = document.getElementById('uploadForm');
+    const loadingDiv = document.getElementById('loadingDiv');
+    const resultCard = document.getElementById('resultCard');
+    const downloadExcelBtn = document.getElementById('downloadExcelBtn');
+    const summaryText = document.getElementById('summaryText');
+    const previewTableBody = document.getElementById('previewTableBody');
+    const tableSearch = document.getElementById('tableSearch');
+
+    function switchMode(mode) {
+        const input = document.getElementById('docTypeInput');
+        input.value = mode;
+        
+        const btnUncert = document.getElementById('modeUncertifiedBtn');
+        const btnCert = document.getElementById('modeCertifiedBtn');
+        const iconUncert = document.getElementById('iconUncert');
+        const iconCert = document.getElementById('iconCert');
+        const subUncert = document.getElementById('subUncert');
+        const subCert = document.getElementById('subCert');
+        
+        const banner = document.getElementById('modeBanner');
+        const bannerIcon = document.getElementById('modeBannerIcon');
+        const bannerTitle = document.getElementById('modeBannerTitle');
+        const bannerDesc = document.getElementById('modeBannerDesc');
+        const dropIcon = document.getElementById('dropIcon');
+        const dropDesc = document.getElementById('dropDesc');
+        const selectFileBtn = document.getElementById('selectFileBtn');
+        
+        if (mode === 'certified') {
+            btnUncert.className = 'btn w-100 py-3 text-start d-flex align-items-center mode-btn btn-outline-secondary bg-white';
+            btnCert.className = 'btn w-100 py-3 text-start d-flex align-items-center mode-btn btn-success text-white shadow-sm';
+            iconUncert.className = 'bi bi-file-earmark-text fs-2 me-3 text-primary';
+            iconCert.className = 'bi bi-award fs-2 me-3 text-white';
+            subUncert.className = 'text-muted';
+            subCert.className = 'text-white-50';
+            
+            banner.className = 'alert alert-success d-flex align-items-center mb-4 shadow-sm';
+            bannerIcon.className = 'bi bi-check-circle-fill text-success fs-4 me-3';
+            bannerTitle.textContent = 'โหมดปัจจุบัน: แปลงไฟล์แบบรับรอง (มีตราประทับและรับรองรายการ)';
+            bannerDesc.textContent = 'เหมาะสำหรับเอกสารแบบรับรองรายการที่มีตราประทับสีน้ำเงิน ลายเซ็นนายทะเบียน และข้อความรับรองจากฐานข้อมูล';
+            
+            dropIcon.className = 'bi bi-award text-success';
+            dropDesc.textContent = 'รองรับไฟล์เอกสาร PDF ท.ร.14/1 แบบรับรอง (มีตราประทับนายทะเบียน & ลายเซ็น)';
+            selectFileBtn.className = 'btn btn-success px-4';
+        } else {
+            btnUncert.className = 'btn w-100 py-3 text-start d-flex align-items-center mode-btn btn-primary text-white shadow-sm';
+            btnCert.className = 'btn w-100 py-3 text-start d-flex align-items-center mode-btn btn-outline-secondary bg-white';
+            iconUncert.className = 'bi bi-file-earmark-text fs-2 me-3 text-white';
+            iconCert.className = 'bi bi-award fs-2 me-3 text-success';
+            subUncert.className = 'text-white-50';
+            subCert.className = 'text-muted';
+            
+            banner.className = 'alert alert-primary d-flex align-items-center mb-4 shadow-sm';
+            bannerIcon.className = 'bi bi-info-circle-fill text-primary fs-4 me-3';
+            bannerTitle.textContent = 'โหมดปัจจุบัน: แปลงไฟล์แบบไม่รับรอง (มาตรฐาน ท.ร.14/1)';
+            bannerDesc.textContent = 'เหมาะสำหรับเอกสารทะเบียนราษฎร ท.ร.14/1 ทั่วไปที่ไม่มีตราประทับรับรองด้านล่าง';
+            
+            dropIcon.className = 'bi bi-cloud-arrow-up text-primary';
+            dropDesc.textContent = 'รองรับไฟล์เอกสาร PDF ท.ร.14/1 (มีกี่หน้าก็ได้ ระบบอ่าน 1 หน้า = 1 แถว)';
+            selectFileBtn.className = 'btn btn-primary px-4';
+        }
+        
+        const newUrl = new URL(window.location);
+        newUrl.searchParams.set('type', mode);
+        window.history.replaceState({}, '', newUrl);
+    }
+
+    // Drag and drop handlers
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropZone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+        });
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        if (files.length > 0) {
+            handleFileSelect(files[0]);
+        }
+    });
+
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            handleFileSelect(e.target.files[0]);
+        }
+    });
+
+    function handleFileSelect(file) {
+        if (!file.name.toLowerCase().endsWith('.pdf')) {
+            Swal.fire({
+                icon: 'error',
+                title: 'ไฟล์ไม่ถูกต้อง',
+                text: 'กรุณาเลือกไฟล์เอกสารที่เป็น .pdf เท่านั้น'
+            });
+            return;
+        }
+        selectedFileName.textContent = `ไฟล์ที่เลือก: ${file.name} (${(file.size / (1024*1024)).toFixed(2)} MB)`;
+        selectedFileName.classList.remove('d-none');
+        startConvertDiv.classList.remove('d-none');
+    }
+
+    // Submit form via AJAX with real-time progress polling
+    uploadForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const file = fileInput.files[0];
+        if (!file) {
+            Swal.fire({ icon: 'warning', text: 'กรุณาเลือกไฟล์ PDF ก่อน' });
+            return;
+        }
+
+        const currentMode = document.getElementById('docTypeInput').value || 'uncertified';
+        const jobId = 'job_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+        const formData = new FormData();
+        formData.append('pdf_file', file);
+        formData.append('doc_type', currentMode);
+        formData.append('job_id', jobId);
+
+        // UI elements
+        const progressBar = document.getElementById('progressBar');
+        const progressBadge = document.getElementById('progressBadge');
+        const progressStageTitle = document.getElementById('progressStageTitle');
+        const progressStatusDetail = document.getElementById('progressStatusDetail');
+
+        // Initial Progress State
+        progressBar.style.width = '8%';
+        progressBadge.textContent = '8%';
+        progressStageTitle.textContent = 'กำลังอัปโหลดไฟล์ PDF...';
+        progressStatusDetail.textContent = `ส่งไฟล์ ${file.name} เข้าสู่เซิร์ฟเวอร์...`;
+
+        // Switch to loading UI
+        dropZone.classList.add('d-none');
+        startConvertDiv.classList.add('d-none');
+        loadingDiv.classList.remove('d-none');
+        resultCard.style.display = 'none';
+
+        // Poll progress endpoint every 400ms
+        let pollTimer = setInterval(async () => {
+            try {
+                const res = await fetch(`/api/upload-progress/${jobId}`);
+                if (res.ok) {
+                    const info = await res.json();
+                    if (info && info.progress !== undefined) {
+                        const pct = Math.min(Math.max(info.progress, 8), 98);
+                        progressBar.style.width = pct + '%';
+                        progressBadge.textContent = pct + '%';
+                        if (info.message) {
+                            progressStatusDetail.textContent = info.message;
+                            if (pct >= 90) {
+                                progressStageTitle.textContent = 'กำลังบันทึกและสร้างไฟล์ Excel...';
+                            } else if (pct >= 15) {
+                                progressStageTitle.textContent = 'กำลังประมวลผลและสกัดข้อมูลจาก PDF...';
+                            }
+                        }
+                    }
+                }
+            } catch (err) {}
+        }, 400);
+
+        try {
+            const response = await fetch("{{ url_for('upload_pdf') }}", {
+                method: 'POST',
+                body: formData
+            });
+
+            clearInterval(pollTimer);
+            const data = await response.json();
+
+            if (!data.success) {
+                loadingDiv.classList.add('d-none');
+                dropZone.classList.remove('d-none');
+                startConvertDiv.classList.remove('d-none');
+                Swal.fire({
+                    icon: 'error',
+                    title: 'แปลงไฟล์ไม่สำเร็จ',
+                    text: data.error || 'เกิดข้อผิดพลาดในการประมวลผล'
+                });
+                return;
+            }
+
+            // 100% Complete
+            progressBar.style.width = '100%';
+            progressBadge.textContent = '100%';
+            progressStageTitle.textContent = 'แปลงไฟล์เสร็จสมบูรณ์ 100%!';
+            progressStatusDetail.textContent = `ประมวลผลเสร็จสิ้น ${data.page_count} หน้า พร้อมดาวน์โหลด`;
+
+            // Wait 400ms for user to see 100% finish
+            setTimeout(() => {
+                loadingDiv.classList.add('d-none');
+                dropZone.classList.remove('d-none');
+                startConvertDiv.classList.remove('d-none');
+
+                // Success View
+                const modeLabel = data.doc_type === 'certified' ? 'แบบรับรอง' : 'แบบไม่รับรอง';
+                summaryText.textContent = `ประมวลผลสำเร็จ ${data.page_count} หน้า = สร้างข้อมูล ${data.row_count} แถวใน Excel [${modeLabel}]`;
+                downloadExcelBtn.href = data.download_url;
+
+                // Render table
+                previewTableBody.innerHTML = '';
+                data.records.forEach((r, idx) => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="text-center fw-bold">${r.no || (idx + 1)}</td>
+                        <td><code>${r.cid || '-'}</code></td>
+                        <td><code>${r.hid || '-'}</code></td>
+                        <td class="fw-medium">${r.full_name || '-'}</td>
+                        <td class="text-center"><span class="badge ${r.gender === 'หญิง' ? 'bg-danger-subtle text-danger' : 'bg-primary-subtle text-primary'}">${r.gender || '-'}</span></td>
+                        <td>${r.dob || '-'}</td>
+                        <td class="text-center">${r.age || '-'}</td>
+                        <td class="text-center"><span class="badge bg-secondary-subtle text-secondary">${r.status || '-'}</span></td>
+                        <td class="small">${r.address || '-'}</td>
+                        <td class="small text-muted">${r.reg_office || '-'}</td>
+                    `;
+                    previewTableBody.appendChild(tr);
+                });
+
+                resultCard.style.display = 'block';
+                resultCard.scrollIntoView({ behavior: 'smooth' });
+
+                Swal.fire({
+                    icon: 'success',
+                    title: 'แปลงไฟล์สำเร็จ!',
+                    text: `ประมวลผลสำเร็จทั้งหมด ${data.page_count} หน้า พร้อมให้ดาวน์โหลดไฟล์ Excel ได้ทันที`,
+                    timer: 2500,
+                    showConfirmButton: false
+                });
+            }, 400);
+
+        } catch (err) {
+            clearInterval(pollTimer);
+            loadingDiv.classList.add('d-none');
+            dropZone.classList.remove('d-none');
+            startConvertDiv.classList.remove('d-none');
+            Swal.fire({
+                icon: 'error',
+                title: 'เกิดข้อผิดพลาดในการเชื่อมต่อ',
+                text: err.message
+            });
+        }
+    });
+
+    // Search filter in table
+    tableSearch.addEventListener('input', function() {
+        const query = this.value.toLowerCase();
+        const rows = previewTableBody.querySelectorAll('tr');
+        rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(query) ? '' : 'none';
+        });
+    });
+</script>
+{% endblock %}

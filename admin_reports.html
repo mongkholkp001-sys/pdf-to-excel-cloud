@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}รายงานประวัติการแปลงไฟล์ทั้งหมด (Admin Reports){% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h3 class="fw-bold mb-1">รายงานประวัติการแปลงไฟล์ทั้งหมด (Audit Log)</h3>
+        <p class="text-muted mb-0">ตรวจสอบและติดตามการใช้งานของทุก User ในระบบ พร้อมดาวน์โหลดไฟล์ผลลัพธ์ย้อนหลัง</p>
+    </div>
+    <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i> กลับหน้าแดชบอร์ด
+    </a>
+</div>
+
+<div class="card p-3 shadow-sm mb-4">
+    <!-- Search / Filter bar -->
+    <div class="row g-2 mb-3">
+        <div class="col-md-6">
+            <div class="input-group">
+                <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
+                <input type="text" id="reportSearch" class="form-control" placeholder="ค้นหารายงาน (พิมพ์ชื่อผู้ใช้, ชื่อไฟล์, วันที่)...">
+            </div>
+        </div>
+        <div class="col-md-6 text-md-end">
+            <span class="badge bg-primary fs-6 p-2">
+                <i class="bi bi-list-check me-1"></i> รายการทั้งหมด {{ conversions|length }} รายการ
+            </span>
+        </div>
+    </div>
+
+    <!-- Reports Table -->
+    <div class="table-responsive font-sarabun">
+        <table class="table table-hover align-middle mb-0" id="reportsTable">
+            <thead class="table-light">
+                <tr>
+                    <th style="width: 5%;">#</th>
+                    <th>ผู้ใช้งาน (User)</th>
+                    <th>ชื่อไฟล์ PDF ต้นฉบับ</th>
+                    <th class="text-center">จำนวนหน้า</th>
+                    <th class="text-center">แถวข้อมูล Excel</th>
+                    <th class="text-center">สถานะ</th>
+                    <th>IP Address</th>
+                    <th>วันและเวลาที่ทำรายการ</th>
+                    <th class="text-end">ไฟล์ผลลัพธ์</th>
+                </tr>
+            </thead>
+            <tbody id="reportsTableBody">
+                {% if conversions %}
+                    {% for c in conversions %}
+                    <tr>
+                        <td class="text-muted">{{ loop.index }}</td>
+                        <td>
+                            <i class="bi bi-person-badge text-primary me-1"></i>
+                            <strong>{{ c.username }}</strong>
+                            <div class="small text-muted">{{ c.full_name }}</div>
+                        </td>
+                        <td class="fw-medium">
+                            <i class="bi bi-file-earmark-pdf text-danger me-1"></i>
+                            {{ c.original_filename }}
+                        </td>
+                        <td class="text-center">
+                            <span class="badge bg-light text-dark border">{{ c.page_count }} หน้า</span>
+                        </td>
+                        <td class="text-center">
+                            <span class="badge bg-primary-subtle text-primary">{{ c.row_count }} แถว</span>
+                        </td>
+                        <td class="text-center">
+                            {% if c.status == 'success' %}
+                            <span class="badge badge-active"><i class="bi bi-check-circle me-1"></i> สำเร็จ</span>
+                            {% else %}
+                            <span class="badge badge-suspended"><i class="bi bi-x-circle me-1"></i> ล้มเหลว</span>
+                            {% endif %}
+                        </td>
+                        <td class="small text-muted">
+                            <code>{{ c.ip_address or '-' }}</code>
+                        </td>
+                        <td class="small text-muted">
+                            <i class="bi bi-clock me-1"></i> {{ c.created_at }}
+                        </td>
+                        <td class="text-end">
+                            {% if c.excel_filename and c.status == 'success' %}
+                            <a href="{{ url_for('download_file', filename=c.excel_filename) }}" class="btn btn-sm btn-outline-success">
+                                <i class="bi bi-download me-1"></i> ดาวน์โหลด .xlsx
+                            </a>
+                            {% else %}
+                            <span class="text-muted small">-</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="9" class="text-center py-5 text-muted">
+                            <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                            ยังไม่มีบันทึกประวัติการแปลงไฟล์ในระบบ
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const reportSearch = document.getElementById('reportSearch');
+    const tableBody = document.getElementById('reportsTableBody');
+
+    reportSearch.addEventListener('input', function() {
+        const query = this.value.toLowerCase();
+        const rows = tableBody.querySelectorAll('tr');
+        rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(query) ? '' : 'none';
+        });
+    });
+</script>
+{% endblock %}

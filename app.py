@@ -1,7 +1,7 @@
 import os
 import uuid
 from functools import wraps
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import (
     Flask, render_template, request, redirect, url_for,
     session, flash, jsonify, send_from_directory, abort
@@ -14,7 +14,13 @@ import excel_exporter
 import hardware_id
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
+app.secret_key = os.environ.get('SECRET_KEY') or 'dev-only-change-me'
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=os.environ.get('RENDER', '').lower() == 'true',
+    PERMANENT_SESSION_LIFETIME=timedelta(days=7),
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
@@ -23,11 +29,8 @@ OUTPUT_FOLDER = os.path.join(BASE_DIR, 'outputs')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-# Initialize Database safely
-try:
-    database.init_db()
-except Exception as e:
-    print(f"[Database Init] {e}")
+# Initialize Database
+database.init_db()
 
 # Decorators
 def login_required(f):
@@ -115,6 +118,7 @@ def login():
                 session['device_mac'] = client_mac
 
         # Set session
+        session.permanent = True
         session['user_id'] = user['id']
         session['username'] = user['username']
         session['full_name'] = user['full_name']
@@ -527,7 +531,7 @@ def admin_settings():
         flash('บันทึกการตั้งค่า Google Gemini API Key เรียบร้อยแล้ว', 'success')
         return redirect(url_for('admin_settings'))
         
-    current_key = database.get_setting('gemini_api_key', '') or os.environ.get('GEMINI_API_KEY', '')
+    current_key = database.get_setting('gemini_api_key', '')
     masked_key = ''
     if current_key:
         if len(current_key) > 8:

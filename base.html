@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}ระบบแปลงไฟล์ PDF เป็น Excel{% endblock %}</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&family=Sarabun:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <!-- SweetAlert2 -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <style>
+        :root {
+            --primary-color: #1a56db;
+            --secondary-color: #0e9f6e;
+            --sidebar-bg: #1e293b;
+            --sidebar-hover: #334155;
+        }
+        body {
+            font-family: 'Kanit', sans-serif;
+            background-color: #f8fafc;
+            color: #1e293b;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .table, .font-sarabun {
+            font-family: 'Sarabun', sans-serif;
+        }
+        .navbar-brand {
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        .nav-link {
+            font-weight: 400;
+            transition: all 0.2s;
+        }
+        .nav-link.active {
+            font-weight: 600;
+            color: var(--primary-color) !important;
+        }
+        .card {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .btn-primary {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+            border-radius: 8px;
+            font-weight: 500;
+            padding: 8px 18px;
+        }
+        .btn-primary:hover {
+            background-color: #1e429f;
+            border-color: #1e429f;
+        }
+        .btn-success {
+            background-color: var(--secondary-color);
+            border-color: var(--secondary-color);
+            border-radius: 8px;
+        }
+        .badge {
+            border-radius: 6px;
+            font-weight: 500;
+            padding: 6px 10px;
+        }
+        .badge-active {
+            background-color: #def7ec;
+            color: #03543f;
+        }
+        .badge-suspended {
+            background-color: #fde8e8;
+            color: #9b1c1c;
+        }
+        .badge-admin {
+            background-color: #e1effe;
+            color: #1e429f;
+        }
+        .badge-user {
+            background-color: #f3f4f6;
+            color: #4b5563;
+        }
+        .content-wrapper {
+            flex: 1;
+            padding: 24px 0;
+        }
+        footer {
+            background-color: #ffffff;
+            border-top: 1px solid #e2e8f0;
+            padding: 16px 0;
+            font-size: 0.9rem;
+            color: #64748b;
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-expand-lg navbar-dark" style="background-color: #1e293b;">
+        <div class="container">
+            <a class="navbar-brand d-flex align-items-center" href="{{ url_for('index') }}">
+                <i class="bi bi-file-earmark-spreadsheet text-success fs-3 me-2"></i>
+                <span>PDF to Excel System</span>
+            </a>
+            
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavbar">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            
+            <div class="collapse navbar-collapse" id="mainNavbar">
+                {% if session.get('user_id') %}
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0 ms-lg-3">
+                    {% if session.get('role') == 'admin' %}
+                    <li class="nav-item">
+                        <a class="nav-link text-light {{ 'active' if request.endpoint == 'admin_dashboard' }}" href="{{ url_for('admin_dashboard') }}">
+                            <i class="bi bi-speedometer2 me-1"></i> แดชบอร์ดภาพรวม
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-light {{ 'active' if request.endpoint == 'admin_users' }}" href="{{ url_for('admin_users') }}">
+                            <i class="bi bi-people me-1"></i> จัดการผู้ใช้ & ระงับสิทธิ์
+                            {% if pending_count and pending_count > 0 %}
+                            <span class="badge rounded-pill bg-danger ms-1">{{ pending_count }}</span>
+                            {% endif %}
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-light {{ 'active' if request.endpoint == 'admin_reports' }}" href="{{ url_for('admin_reports') }}">
+                            <i class="bi bi-file-text me-1"></i> รายงานการแปลงไฟล์
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-light {{ 'active' if request.endpoint == 'admin_settings' }}" href="{{ url_for('admin_settings') }}">
+                            <i class="bi bi-stars text-warning me-1"></i> ตั้งค่า Enterprise AI
+                        </a>
+                    </li>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle text-light {{ 'active' if request.endpoint == 'dashboard' }}" href="#" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-cloud-arrow-up me-1"></i> แปลงไฟล์ PDF
+                        </a>
+                        <ul class="dropdown-menu shadow">
+                            <li>
+                                <a class="dropdown-item py-2" href="{{ url_for('dashboard', type='uncertified') }}">
+                                    <i class="bi bi-file-earmark-text text-primary me-2 fs-5 align-middle"></i>
+                                    <strong>1. แบบไม่รับรอง</strong>
+                                    <div class="text-muted small ms-4">มาตรฐาน ท.ร.14/1 ทั่วไป</div>
+                                </a>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li>
+                                <a class="dropdown-item py-2" href="{{ url_for('dashboard', type='certified') }}">
+                                    <i class="bi bi-award text-success me-2 fs-5 align-middle"></i>
+                                    <strong>2. แบบรับรอง</strong>
+                                    <div class="text-muted small ms-4">มีตราประทับนายทะเบียน & รับรองรายการ</div>
+                                </a>
+                            </li>
+                        </ul>
+                    </li>
+                    {% else %}
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle text-light {{ 'active' if request.endpoint == 'dashboard' }}" href="#" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-cloud-arrow-up me-1"></i> เมนูแปลงไฟล์ PDF
+                        </a>
+                        <ul class="dropdown-menu shadow">
+                            <li>
+                                <a class="dropdown-item py-2" href="{{ url_for('dashboard', type='uncertified') }}">
+                                    <i class="bi bi-file-earmark-text text-primary me-2 fs-5 align-middle"></i>
+                                    <strong>1. แบบไม่รับรอง</strong>
+                                    <div class="text-muted small ms-4">มาตรฐาน ท.ร.14/1 ทั่วไป</div>
+                                </a>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li>
+                                <a class="dropdown-item py-2" href="{{ url_for('dashboard', type='certified') }}">
+                                    <i class="bi bi-award text-success me-2 fs-5 align-middle"></i>
+                                    <strong>2. แบบรับรอง</strong>
+                                    <div class="text-muted small ms-4">มีตราประทับนายทะเบียน & รับรองรายการ</div>
+                                </a>
+                            </li>
+                        </ul>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-light {{ 'active' if request.endpoint == 'history' }}" href="{{ url_for('history') }}">
+                            <i class="bi bi-clock-history me-1"></i> ประวัติการแปลงไฟล์
+                        </a>
+                    </li>
+                    {% endif %}
+                </ul>
+                
+                <div class="d-flex align-items-center">
+                    <div class="dropdown">
+                        <button class="btn btn-outline-light dropdown-toggle d-flex align-items-center" type="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle fs-5 me-2"></i>
+                            <span class="me-2">{{ session.get('full_name') }}</span>
+                            <span class="badge {{ 'badge-admin' if session.get('role') == 'admin' else 'badge-user' }} ms-1">
+                                {{ 'Admin' if session.get('role') == 'admin' else 'User' }}
+                            </span>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end shadow">
+                            <li><h6 class="dropdown-header">เข้าสู่ระบบในชื่อ: {{ session.get('username') }}</h6></li>
+                            <li>
+                                <a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#changeMyPasswordModal">
+                                    <i class="bi bi-key-fill text-warning me-2"></i> เปลี่ยนรหัสผ่านของฉัน
+                                </a>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li>
+                                <a class="dropdown-item text-danger" href="{{ url_for('logout') }}">
+                                    <i class="bi bi-box-arrow-right me-2"></i> ออกจากระบบ
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <!-- Flash Messages -->
+    <div class="container mt-3">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        <i class="bi {{ 'bi-check-circle-fill' if category == 'success' else 'bi-exclamation-triangle-fill' if category == 'danger' else 'bi-info-circle-fill' }} me-2"></i>
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="content-wrapper">
+        <div class="container">
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="text-center">
+        <div class="container">
+            <small>ระบบแปลงไฟล์ PDF เป็น Excel (ทะเบียนราษฎร ท.ร.14/1) | พัฒนาด้วย Python & Flask</small>
+        </div>
+    </footer>
+
+    <!-- Modal: Change My Password -->
+    {% if session.get('user_id') %}
+    <div class="modal fade" id="changeMyPasswordModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-key-fill text-warning me-2"></i> เปลี่ยนรหัสผ่านของฉัน</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="changeMyPasswordForm">
+                        <div class="mb-3">
+                            <label class="form-label small fw-medium">รหัสผ่านปัจจุบัน</label>
+                            <input type="password" id="myCurrentPassword" class="form-control" placeholder="กรอกรหัสผ่านปัจจุบัน" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-medium">รหัสผ่านใหม่ (อย่างน้อย 4 ตัวอักษร)</label>
+                            <input type="password" id="myNewPassword" class="form-control" placeholder="กรอกรหัสผ่านใหม่" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-medium">ยืนยันรหัสผ่านใหม่</label>
+                            <input type="password" id="myConfirmPassword" class="form-control" placeholder="กรอกยืนยันรหัสผ่านใหม่อีกครั้ง" required>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+                    <button type="button" class="btn btn-warning" onclick="submitChangeMyPassword()">
+                        <i class="bi bi-check2-circle me-1"></i> ยืนยันเปลี่ยนรหัสผ่าน
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Bootstrap 5 Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        async function submitChangeMyPassword() {
+            const current_password = document.getElementById('myCurrentPassword').value.trim();
+            const new_password = document.getElementById('myNewPassword').value.trim();
+            const confirm_password = document.getElementById('myConfirmPassword').value.trim();
+
+            if (!current_password || !new_password || !confirm_password) {
+                Swal.fire({ icon: 'warning', text: 'กรุณากรอกข้อมูลให้ครบทุกช่อง' });
+                return;
+            }
+
+            if (new_password !== confirm_password) {
+                Swal.fire({ icon: 'warning', text: 'รหัสผ่านใหม่และการยืนยันรหัสผ่านไม่ตรงกัน' });
+                return;
+            }
+
+            if (new_password.length < 4) {
+                Swal.fire({ icon: 'warning', text: 'รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย 4 ตัวอักษร' });
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('current_password', current_password);
+            formData.append('new_password', new_password);
+            formData.append('confirm_password', confirm_password);
+
+            try {
+                const response = await fetch("{{ url_for('change_my_password') }}", {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                if (data.success) {
+                    const modalEl = document.getElementById('changeMyPasswordModal');
+                    const modalInstance = bootstrap.Modal.getInstance(modalEl);
+                    if (modalInstance) modalInstance.hide();
+                    
+                    document.getElementById('changeMyPasswordForm').reset();
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'สำเร็จ',
+                        text: data.message,
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                } else {
+                    Swal.fire({ icon: 'error', text: data.message });
+                }
+            } catch (err) {
+                Swal.fire({ icon: 'error', text: err.message });
+            }
+        }
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
