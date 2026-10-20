@@ -7,6 +7,16 @@ import requests
 import fitz
 from PIL import Image
 
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+CANDIDATE_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-flash-latest",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash-lite",
+]
+_ACTIVE_GEMINI_MODEL = None
+
 SYSTEM_PROMPT = """คุณคือผู้เชี่ยวชาญด้านการอ่านและสกัดข้อมูลเอกสารราชการไทย โดยเฉพาะเอกสารทะเบียนราษฎร ท.ร. 14/1 (ทั้งแบบไม่รับรองและแบบรับรองที่มีตราประทับนายทะเบียน/ผู้ช่วยนายทะเบียน ลายเซ็น และรอยหมึก)
 
 หน้าที่ของคุณ:
@@ -81,167 +91,91 @@ JSON_SCHEMA_EXAMPLE = {
     "print_date": ""
 }
 
-_ACTIVE_MODELS = {}
 
-def get_supported_models(api_key):
-    """Query Google Gemini ModelService to get available models for this key."""
+def _discover_available_models(api_key):
+    """Query Google Gemini ListModels API to find supported generateContent models dynamically."""
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-        resp = requests.get(url, timeout=12)
+        resp = requests.get(f"{GEMINI_BASE_URL}/models?key={api_key}", timeout=10)
         if resp.status_code == 200:
-            data = resp.json()
-            models = data.get("models", [])
-            supported = [
-                m["name"].replace("models/", "")
-                for m in models
-                if "generateContent" in m.get("supportedGenerationMethods", [])
-            ]
-            if supported:
-                return supported
-    except Exception as e:
-        print(f"[Gemini AI] ListModels exception: {e}")
-    
-    return [
-        "gemini-3.5-flash-lite",
-        "gemini-3.5-flash",
-        "gemini-3.1-flash",
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash-latest"
-    ]
+            models = resp.json().get("models", [])
+            supported = []
+            for m in models:
+                methods = m.get("supportedGenerationMethods", [])
+                name = m.get("name", "")
+                if "generateContent" in methods and name.startswith("models/gemini"):
+                    short_name = name.replace("models/", "")
+                    if "tts" not in short_name and "image" not in short_name and "embedding" not in short_name:
+                        supported.append(short_name)
+            # Prioritize flash models
+            flash_models = [m for m in supported if "flash" in m]
+            other_models = [m for m in supported if "flash" not in m]
+            return flash_models + other_models
+    except Exception:
+        pass
+    return []
 
-def rank_models(models_list):
-    """Ranks models with latest, fastest Gemini 3.5 / 3.1 Flash models first."""
-    priorities = [
-        "gemini-3.5-flash-lite",
-        "gemini-3.5-flash",
-        "gemini-3.1-flash-lite",
-        "gemini-3.1-flash",
-        "gemini-3-flash",
-        "gemini-3.0-flash",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-2.0-flash",
-        "gemini-2.0-flash-exp",
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-flash-002",
-        "gemini-1.5-flash",
-        "gemini-3.5-pro",
-        "gemini-3.1-pro",
-        "gemini-3-pro",
-        "gemini-2.5-pro",
-        "gemini-2.0-pro",
-        "gemini-1.5-pro"
-    ]
-    def score(name):
-        name_lower = name.lower()
-        for idx, p in enumerate(priorities):
-            if p == name_lower:
-                return idx
-            if p in name_lower:
-                return idx + 0.1
-        if "3.5" in name_lower:
-            return len(priorities)
-        if "3." in name_lower:
-            return len(priorities) + 1
-        if "flash" in name_lower:
-            return len(priorities) + 2
-        return len(priorities) + 3
-        
-    return sorted(models_list, key=score)
 
-def clean_and_parse_json(raw_text):
-    """Safely extracts and parses JSON even if wrapped in markdown code blocks."""
-    text = raw_text.strip()
-    if text.startswith("```json"):
-        text = text[7:]
-    elif text.startswith("```"):
-        text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-    text = text.strip()
-    return json.loads(text)
+def _get_model_candidates(api_key):
+    global _ACTIVE_GEMINI_MODEL
+    candidates = []
+    if _ACTIVE_GEMINI_MODEL:
+        candidates.append(_ACTIVE_GEMINI_MODEL)
+    for m in CANDIDATE_MODELS:
+        if m not in candidates:
+            candidates.append(m)
+    return candidates
+
+
+def _post_generate_content(api_key, payload, timeout=45):
+    """Try candidate models in order; if 404 NOT_FOUND, auto-discover via ListModels."""
+    global _ACTIVE_GEMINI_MODEL
+    headers = {"Content-Type": "application/json"}
+    candidates = _get_model_candidates(api_key)
+    last_resp = None
+
+    for model_name in candidates:
+        url = f"{GEMINI_BASE_URL}/models/{model_name}:generateContent?key={api_key}"
+        resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+        last_resp = resp
+        if resp.status_code == 200:
+            _ACTIVE_GEMINI_MODEL = model_name
+            return resp, model_name
+        if resp.status_code == 404:
+            continue
+        # If 400/401/403/429 (e.g. invalid API key or quota), return immediately
+        return resp, model_name
+
+    # Fallback: dynamically list models from the API key's account
+    discovered = _discover_available_models(api_key)
+    for model_name in discovered:
+        if model_name in candidates:
+            continue
+        url = f"{GEMINI_BASE_URL}/models/{model_name}:generateContent?key={api_key}"
+        resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+        last_resp = resp
+        if resp.status_code == 200:
+            _ACTIVE_GEMINI_MODEL = model_name
+            return resp, model_name
+        if resp.status_code != 404:
+            return resp, model_name
+
+    return last_resp, (candidates[0] if candidates else "gemini-2.5-flash")
+
 
 def page_to_base64_image(page, dpi=200):
-    """Render PyMuPDF page to high-quality JPEG base64 string."""
+    """Render PyMuPDF page to high-quality JPEG/PNG base64 string."""
     pix = page.get_pixmap(dpi=dpi)
     img_bytes = pix.tobytes("jpeg")
     return base64.b64encode(img_bytes).decode("utf-8")
 
-def test_gemini_connection(api_key):
-    """Verifies that the Gemini API Key is valid and functional, testing across all supported models."""
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-        resp = requests.get(url, timeout=12)
-        if resp.status_code != 200:
-            err_detail = "API Key ไม่ถูกต้อง หรือไม่มีสิทธิ์เข้าถึง"
-            try:
-                err_json = resp.json()
-                if "error" in err_json and "message" in err_json["error"]:
-                    err_detail = err_json["error"]["message"]
-            except Exception:
-                pass
-            return False, f"เชื่อมต่อไม่สำเร็จ (Code {resp.status_code}): {err_detail}"
-
-        data = resp.json()
-        models = data.get("models", [])
-        supported = [
-            m["name"].replace("models/", "")
-            for m in models
-            if "generateContent" in m.get("supportedGenerationMethods", [])
-        ]
-
-        if not supported:
-            return False, "API Key ถูกต้อง แต่ไม่พบโมเดลที่รองรับ generateContent ในโปรเจกต์นี้"
-
-        ranked = rank_models(supported)
-        last_error = ""
-
-        # Test through the ranked models until one succeeds!
-        for model_name in ranked:
-            post_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
-            payload = {
-                "contents": [
-                    {
-                        "parts": [
-                            {"text": "สวัสดี ตอบสั้นๆ ว่า OK"}
-                        ]
-                    }
-                ],
-                "generationConfig": {
-                    "temperature": 0.0
-                }
-            }
-            try:
-                test_resp = requests.post(post_url, headers={"Content-Type": "application/json"}, json=payload, timeout=10)
-                if test_resp.status_code == 200:
-                    _ACTIVE_MODELS[api_key] = model_name
-                    return True, f"เชื่อมต่อสำเร็จ 100%! ระบบตรวจพบและเชื่อมต่อกับโมเดล '{model_name}' เรียบร้อยแล้ว"
-                else:
-                    try:
-                        err_json = test_resp.json()
-                        last_error = err_json.get("error", {}).get("message", test_resp.text)
-                    except Exception:
-                        last_error = f"Code {test_resp.status_code}: {test_resp.text}"
-            except Exception as e:
-                last_error = str(e)
-
-        return False, f"เชื่อมต่อไม่สำเร็จ ({last_error})"
-    except Exception as e:
-        return False, f"ข้อผิดพลาดการเชื่อมต่อ: {str(e)}"
 
 def extract_page_with_gemini(page, page_num=1, api_key=None, max_retries=2):
     """
-    Extracts Thai Civil Registration data from a PDF page using Google Gemini Vision.
+    Extracts Thai Civil Registration data from a PDF page using Gemini Flash Vision.
     Returns a standardized dictionary ready for Excel export.
     """
     if not api_key:
         raise ValueError("Gemini API key is required")
-
-    supported = get_supported_models(api_key)
-    ranked = rank_models(supported) if supported else ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash"]
-    active_model = _ACTIVE_MODELS.get(api_key, ranked[0])
-    candidate_models = [active_model] + [m for m in ranked if m != active_model]
 
     img_b64 = page_to_base64_image(page, dpi=200)
 
@@ -267,58 +201,74 @@ def extract_page_with_gemini(page, page_num=1, api_key=None, max_retries=2):
         }
     }
 
-    headers = {
-        "Content-Type": "application/json"
-    }
+    for attempt in range(max_retries + 1):
+        try:
+            resp, used_model = _post_generate_content(api_key, payload, timeout=45)
+            if resp is not None and resp.status_code == 200:
+                res_data = resp.json()
+                candidates = res_data.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        raw_json_str = parts[0].get("text", "{}")
+                        record = json.loads(raw_json_str)
 
-    for model_name in candidate_models:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
-        for attempt in range(max_retries + 1):
-            try:
-                resp = requests.post(url, headers=headers, json=payload, timeout=45)
-                if resp.status_code == 200:
-                    res_data = resp.json()
-                    candidates = res_data.get("candidates", [])
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts", [])
-                        if parts:
-                            raw_json_str = parts[0].get("text", "{}")
-                            record = clean_and_parse_json(raw_json_str)
+                        # Standardize fields
+                        record["no"] = page_num
+                        record["person_status"] = ""  # strictly empty
 
-                            # Cache working model for subsequent pages
-                            _ACTIVE_MODELS[api_key] = model_name
+                        # Clean up mother / father names if any label leaked
+                        if record.get("mother_name"):
+                            m_name = record["mother_name"]
+                            for bad in ["มารดาชื่อ", "ชื่อ", "สัญชาติ", "ไทย", "-", ":", "."]:
+                                m_name = m_name.replace(bad, "")
+                            record["mother_name"] = m_name.strip()
 
-                            # Standardize fields
-                            record["no"] = page_num
-                            record["person_status"] = ""  # strictly empty
+                        if record.get("father_name"):
+                            f_name = record["father_name"]
+                            for bad in ["บิดาชื่อ", "ชื่อ", "สัญชาติ", "ไทย", "-", ":", "."]:
+                                f_name = f_name.replace(bad, "")
+                            record["father_name"] = f_name.strip()
 
-                            # Clean up mother / father names if any label leaked
-                            if record.get("mother_name"):
-                                m_name = record["mother_name"]
-                                for bad in ["มารดาชื่อ", "ชื่อ", "สัญชาติ", "ไทย", "-", ":", "."]:
-                                    m_name = m_name.replace(bad, "")
-                                record["mother_name"] = m_name.strip()
-
-                            if record.get("father_name"):
-                                f_name = record["father_name"]
-                                for bad in ["บิดาชื่อ", "ชื่อ", "สัญชาติ", "ไทย", "-", ":", "."]:
-                                    f_name = f_name.replace(bad, "")
-                                record["father_name"] = f_name.strip()
-
-                            return record
-                elif resp.status_code == 404:
-                    print(f"[Gemini AI] Model {model_name} returned 404, switching to next model...")
-                    break
-                else:
-                    err_msg = resp.text
-                    print(f"[Gemini API Error {resp.status_code}] Attempt {attempt+1}: {err_msg}")
-                    if attempt < max_retries:
-                        time.sleep(2)
-                        continue
-            except Exception as e:
+                        return record
+            else:
+                status_code = resp.status_code if resp is not None else "NoResponse"
+                err_msg = resp.text if resp is not None else "No response"
+                print(f"[Gemini API Error {status_code} ({used_model})] Attempt {attempt+1}: {err_msg}")
                 if attempt < max_retries:
                     time.sleep(2)
                     continue
-                break
+                raise RuntimeError(f"Gemini API error ({status_code}): {err_msg}")
+        except Exception as e:
+            if attempt < max_retries:
+                time.sleep(2)
+                continue
+            raise e
 
-    raise RuntimeError("Failed to extract data using Gemini AI across available models")
+    raise RuntimeError("Failed to extract data using Gemini AI")
+
+
+def test_gemini_connection(api_key):
+    """Verifies that the Gemini API Key is valid and functional."""
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": "Hello, please reply with 'OK' if you can read this."}
+                ]
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.0
+        }
+    }
+    try:
+        resp, used_model = _post_generate_content(api_key, payload, timeout=15)
+        if resp is not None and resp.status_code == 200:
+            return True, f"เชื่อมต่อ Google Gemini API สำเร็จเรียบร้อยแล้ว! (โมเดล: {used_model})"
+        else:
+            code = resp.status_code if resp is not None else "N/A"
+            text = resp.text if resp is not None else "ไม่สามารถติดต่อเซิร์ฟเวอร์ได้"
+            return False, f"เชื่อมต่อไม่สำเร็จ (Code {code}): {text}"
+    except Exception as e:
+        return False, f"ข้อผิดพลาดการเชื่อมต่อ: {str(e)}"
