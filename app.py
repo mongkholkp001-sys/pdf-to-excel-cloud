@@ -62,13 +62,32 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+def user_can_civil(user):
+    if not user:
+        return False
+    if user.get('role') == 'admin':
+        return True
+    return bool(user.get('allow_civil', 1))
+
+def user_can_land(user):
+    if not user:
+        return False
+    if user.get('role') == 'admin':
+        return True
+    return bool(user.get('allow_land', 1))
+
 # Context Processor for Templates
 @app.context_processor
 def inject_user():
     user = None
     pending_count = 0
+    can_civil = False
+    can_land = False
     if 'user_id' in session:
         user = database.get_user_by_id(session['user_id'])
+        if user:
+            can_civil = user_can_civil(user)
+            can_land = user_can_land(user)
         if session.get('role') == 'admin':
             try:
                 pending_count = len(database.get_pending_users())
@@ -76,7 +95,14 @@ def inject_user():
                 pending_count = 0
     gemini_key = database.get_setting('gemini_api_key') or os.environ.get('GEMINI_API_KEY')
     gemini_active = bool(gemini_key)
-    return dict(current_user=user, pending_count=pending_count, now=datetime.now(), gemini_active=gemini_active)
+    return dict(
+        current_user=user,
+        can_civil=can_civil,
+        can_land=can_land,
+        pending_count=pending_count,
+        now=datetime.now(),
+        gemini_active=gemini_active
+    )
 
 # Routes
 @app.route('/')
@@ -145,6 +171,13 @@ def register():
         full_name = request.form.get('full_name', '').strip()
         phone = request.form.get('phone', '').strip()
         plan_type = request.form.get('plan_type', 'rental_1m').strip()
+        access_scope = request.form.get('access_scope', 'civil').strip()
+        if access_scope == 'land':
+            allow_civil, allow_land = 0, 1
+        elif access_scope == 'both':
+            allow_civil, allow_land = 1, 1
+        else:
+            allow_civil, allow_land = 1, 0
         
         if not username or not password or not full_name:
             flash('กรุณากรอกข้อมูลให้ครบถ้วนในช่องที่มีเครื่องหมาย *', 'danger')
@@ -158,7 +191,10 @@ def register():
             flash('รหัสผ่านต้องมีความยาวอย่างน้อย 4 ตัวอักษร', 'warning')
             return render_template('register.html')
             
-        success, msg = database.register_user(username, password, full_name, phone, plan_type)
+        success, msg = database.register_user(
+            username, password, full_name, phone, plan_type,
+            allow_civil=allow_civil, allow_land=allow_land
+        )
         if success:
             flash(msg, 'success')
             return redirect(url_for('login'))
@@ -201,9 +237,27 @@ def change_my_password():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    doc_type = request.args.get('type', 'uncertified').strip()
-    if doc_type not in ['uncertified', 'certified', 'land']:
-        doc_type = 'uncertified'
+    user = database.get_user_by_id(session['user_id'])
+    can_civil = user_can_civil(user)
+    can_land = user_can_land(user)
+
+    raw_type = request.args.get('type', '').strip()
+    if not raw_type:
+        doc_type = 'uncertified' if can_civil else ('land' if can_land else 'uncertified')
+    else:
+        doc_type = raw_type if raw_type in ['uncertified', 'certified', 'land'] else 'uncertified'
+
+    if doc_type in ['uncertified', 'certified'] and not can_civil:
+        if can_land:
+            if raw_type:
+                flash('บัญชีของคุณได้รับสิทธิ์เฉพาะ "ระบบแปลงข้อมูลที่ดิน" เท่านั้น (ไม่มีสิทธิ์ใช้งานระบบแปลง ท.ร.14/1)', 'warning')
+            return redirect(url_for('dashboard', type='land'))
+    elif doc_type == 'land' and not can_land:
+        if can_civil:
+            if raw_type:
+                flash('บัญชีของคุณได้รับสิทธิ์เฉพาะ "ระบบแปลง ท.ร.14/1" เท่านั้น (ไม่มีสิทธิ์ใช้งานระบบแปลงข้อมูลที่ดิน)', 'warning')
+            return redirect(url_for('dashboard', type='uncertified'))
+
     return render_template('dashboard.html', active_doc_type=doc_type)
 
 MERGED_LAND_CACHE = {}
@@ -211,11 +265,18 @@ MERGED_LAND_CACHE = {}
 @app.route('/pdf-merger')
 @login_required
 def pdf_merger():
+    user = database.get_user_by_id(session['user_id'])
+    if not user_can_land(user):
+        flash('บัญชีของคุณไม่มีสิทธิ์ใช้งานระบบแปลงและรวมไฟล์ที่ดิน (ได้รับสิทธิ์เฉพาะระบบแปลง ท.ร.14/1)', 'warning')
+        return redirect(url_for('dashboard', type='uncertified'))
     return render_template('pdf_merger.html')
 
 @app.route('/api/merge-land-pdf', methods=['POST'])
 @login_required
 def merge_land_pdf_api():
+    user = database.get_user_by_id(session['user_id'])
+    if not user_can_land(user):
+        return jsonify({'success': False, 'error': 'บัญชีของคุณไม่มีสิทธิ์ใช้งานระบบรวมและแปลงไฟล์ที่ดิน กรุณาติดต่อผู้ดูแลระบบ'}), 403
     files = request.files.getlist('pdf_files')
     if not files or all(f.filename == '' for f in files):
         return jsonify({'success': False, 'error': 'กรุณาเลือกไฟล์ PDF อย่างน้อย 1 ไฟล์'}), 400
@@ -288,6 +349,9 @@ def merge_land_pdf_api():
 @app.route('/api/merged-land-result/<merged_id>')
 @login_required
 def get_merged_land_result(merged_id):
+    user = database.get_user_by_id(session['user_id'])
+    if not user_can_land(user):
+        return jsonify({'success': False, 'error': 'บัญชีของคุณไม่มีสิทธิ์ใช้งานระบบแปลงข้อมูลที่ดิน'}), 403
     if merged_id in MERGED_LAND_CACHE:
         return jsonify(MERGED_LAND_CACHE[merged_id])
     # Fallback if server restarted: read from outputs folder
@@ -347,6 +411,12 @@ def upload_pdf():
     
     if doc_type not in ['uncertified', 'certified', 'land']:
         doc_type = 'uncertified'
+
+    user = database.get_user_by_id(session['user_id'])
+    if doc_type == 'land' and not user_can_land(user):
+        return jsonify({'success': False, 'error': 'บัญชีของคุณไม่มีสิทธิ์ใช้งานระบบแปลงไฟล์ข้อมูลที่ดิน กรุณาติดต่อผู้ดูแลระบบเพื่อขอเปิดสิทธิ์'}), 403
+    if doc_type in ['uncertified', 'certified'] and not user_can_civil(user):
+        return jsonify({'success': False, 'error': 'บัญชีของคุณไม่มีสิทธิ์ใช้งานระบบแปลงไฟล์ ท.ร.14/1 กรุณาติดต่อผู้ดูแลระบบเพื่อขอเปิดสิทธิ์'}), 403
 
     valid_files = [f for f in files if f and f.filename and f.filename.lower().endswith('.pdf')]
     if not valid_files:
@@ -548,7 +618,12 @@ def admin_users():
 @app.route('/admin/users/approve/<int:user_id>', methods=['POST'])
 @admin_required
 def admin_approve_user(user_id):
-    success, msg = database.approve_user(user_id)
+    data = request.get_json(silent=True) or {}
+    allow_civil = data.get('allow_civil', request.form.get('allow_civil'))
+    allow_land = data.get('allow_land', request.form.get('allow_land'))
+    ac = (int(allow_civil) == 1) if allow_civil is not None else None
+    al = (int(allow_land) == 1) if allow_land is not None else None
+    success, msg = database.approve_user(user_id, allow_civil=ac, allow_land=al)
     return jsonify({'success': success, 'message': msg})
 
 @app.route('/admin/users/reject/<int:user_id>', methods=['POST'])
@@ -563,6 +638,19 @@ def admin_toggle_user(user_id):
     success, message = database.toggle_user_status(user_id)
     return jsonify({'success': success, 'message': message})
 
+@app.route('/admin/users/permissions/<int:user_id>', methods=['POST'])
+@admin_required
+def admin_update_permissions(user_id):
+    data = request.get_json(silent=True) or {}
+    allow_civil = data.get('allow_civil')
+    allow_land = data.get('allow_land')
+    if allow_civil is None:
+        allow_civil = request.form.get('allow_civil', '0') == '1'
+    if allow_land is None:
+        allow_land = request.form.get('allow_land', '0') == '1'
+    success, msg = database.update_user_permissions(user_id, bool(int(allow_civil)), bool(int(allow_land)))
+    return jsonify({'success': success, 'message': msg})
+
 @app.route('/admin/users/create', methods=['POST'])
 @admin_required
 def admin_create_user():
@@ -572,12 +660,17 @@ def admin_create_user():
     role = request.form.get('role', 'user').strip()
     plan_type = request.form.get('plan_type', 'lifetime').strip()
     phone = request.form.get('phone', '').strip()
+    allow_civil = 1 if request.form.get('allow_civil') == '1' else 0
+    allow_land = 1 if request.form.get('allow_land') == '1' else 0
     
     if not username or not password or not full_name:
         flash('กรุณากรอกข้อมูลให้ครบทุกช่อง', 'danger')
         return redirect(url_for('admin_users'))
         
-    success, msg = database.create_user(username, password, full_name, role, plan_type, phone)
+    success, msg = database.create_user(
+        username, password, full_name, role, plan_type, phone,
+        allow_civil=allow_civil, allow_land=allow_land
+    )
     if success:
         flash(msg, 'success')
     else:

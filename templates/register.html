@@ -122,6 +122,45 @@
 
                 <hr class="my-4">
 
+                <!-- Select Access Scope (สิทธิ์แปลง ท.ร. / สิทธิ์แปลงที่ดิน) -->
+                <div class="mb-4">
+                    <label class="form-label fw-bold fs-6 mb-2">
+                        <i class="bi bi-shield-check text-primary me-1"></i> เลือกสิทธิ์ระบบที่ต้องการใช้งาน <span class="text-danger">*</span>:
+                    </label>
+                    <p class="text-muted small mb-3">สามารถเลือกขอเปิดสิทธิ์เฉพาะระบบทะเบียนราษฎร (ท.ร.14/1) เฉพาะระบบข้อมูลที่ดิน หรือใช้งานทั้ง 2 ระบบ</p>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="border rounded-3 p-3 w-100 h-100 d-block bg-light bg-opacity-50" style="cursor: pointer;">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="access_scope" value="civil" checked>
+                                    <span class="fw-bold text-primary"><i class="bi bi-person-vcard me-1"></i> สิทธิ์แปลง ท.ร.14/1</span>
+                                </div>
+                                <div class="small text-muted mt-1 ms-4">สำหรับแปลงเอกสารทะเบียนราษฎร ท.ร.14/1 (แบบไม่รับรอง & แบบรับรอง)</div>
+                            </label>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="border rounded-3 p-3 w-100 h-100 d-block bg-light bg-opacity-50" style="cursor: pointer;">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="access_scope" value="land">
+                                    <span class="fw-bold text-warning-emphasis"><i class="bi bi-geo-alt-fill text-warning me-1"></i> สิทธิ์แปลงที่ดิน</span>
+                                </div>
+                                <div class="small text-muted mt-1 ms-4">สำหรับแปลงข้อมูลที่ดิน (25 คอลัมน์) และเมนูรวม & จัดเรียงไฟล์ PDF โฉนด</div>
+                            </label>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="border rounded-3 p-3 w-100 h-100 d-block bg-light bg-opacity-50" style="cursor: pointer;">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="access_scope" value="both">
+                                    <span class="fw-bold text-success"><i class="bi bi-layers-fill me-1"></i> ทั้ง ท.ร.14/1 + ที่ดิน</span>
+                                </div>
+                                <div class="small text-muted mt-1 ms-4">เปิดใช้งานครบทั้งระบบแปลง ท.ร.14/1 และระบบแปลง/รวมไฟล์ที่ดิน</div>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <hr class="my-4">
+
                 <!-- Account Information -->
                 <div class="row g-3">
                     <div class="col-md-6">

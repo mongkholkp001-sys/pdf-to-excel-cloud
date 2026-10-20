@@ -35,7 +35,8 @@
                     <th>ชื่อ - นามสกุล</th>
                     <th>เบอร์โทร / LINE</th>
                     <th>แพ็กเกจที่เลือก</th>
-                    <th class="text-end" style="width: 20%;">การดำเนินการ</th>
+                    <th>สิทธิ์ที่ขอเปิดใช้</th>
+                    <th class="text-end" style="width: 22%;">การดำเนินการ</th>
                 </tr>
             </thead>
             <tbody>
@@ -50,9 +51,19 @@
                     <td>
                         <span class="badge bg-primary-subtle text-primary fs-6">{{ pu.plan_name or 'เช่า 1 เดือน' }}</span>
                     </td>
+                    <td>
+                        <div class="d-flex flex-wrap gap-1">
+                            {% if pu.allow_civil is not defined or pu.allow_civil %}
+                            <span class="badge bg-primary"><i class="bi bi-person-vcard me-1"></i>สิทธิ์แปลง ท.ร.</span>
+                            {% endif %}
+                            {% if pu.allow_land %}
+                            <span class="badge bg-warning text-dark"><i class="bi bi-geo-alt-fill me-1"></i>สิทธิ์แปลงที่ดิน</span>
+                            {% endif %}
+                        </div>
+                    </td>
                     <td class="text-end">
                         <div class="btn-group btn-group-sm">
-                            <button class="btn btn-success px-3" onclick="approveUser({{ pu.id }}, '{{ pu.username }}', '{{ pu.plan_name }}')">
+                            <button class="btn btn-success px-3" onclick="approveUser({{ pu.id }}, '{{ pu.username }}', '{{ pu.plan_name }}', {{ 1 if (pu.allow_civil is not defined or pu.allow_civil) else 0 }}, {{ 1 if pu.allow_land else 0 }})">
                                 <i class="bi bi-check-lg me-1"></i> กดอนุมัติ
                             </button>
                             <button class="btn btn-outline-danger" onclick="rejectUser({{ pu.id }}, '{{ pu.username }}')">
@@ -79,16 +90,17 @@
         <table class="table table-hover align-middle mb-0">
             <thead class="table-light">
                 <tr>
-                    <th style="width: 4%;">#</th>
+                    <th style="width: 3%;">#</th>
                     <th>ชื่อผู้ใช้ (Username)</th>
                     <th>ชื่อ - นามสกุล</th>
                     <th>เบอร์ติดต่อ</th>
                     <th>แพ็กเกจการใช้งาน</th>
+                    <th>สิทธิ์การใช้งาน (ท.ร. / ที่ดิน)</th>
                     <th class="text-center">สถานะบัญชี</th>
                     <th>วันหมดอายุ</th>
                     <th class="text-center">เครื่องที่ผูก (MAC)</th>
                     <th class="text-center">แปลงแล้ว</th>
-                    <th class="text-end" style="width: 22%;">การจัดการ</th>
+                    <th class="text-end" style="width: 24%;">การจัดการ</th>
                 </tr>
             </thead>
             <tbody>
@@ -105,6 +117,35 @@
                     <td class="small">{{ u.phone or '-' }}</td>
                     <td>
                         <span class="badge bg-light text-dark border">{{ u.plan_name or 'ซื้อขาด' }}</span>
+                    </td>
+                    <td>
+                        {% if u.role == 'admin' %}
+                        <div class="d-flex flex-wrap gap-1">
+                            <span class="badge bg-primary"><i class="bi bi-person-vcard me-1"></i>สิทธิ์ ท.ร.</span>
+                            <span class="badge bg-warning text-dark"><i class="bi bi-geo-alt-fill me-1"></i>สิทธิ์ที่ดิน</span>
+                        </div>
+                        {% else %}
+                        <div class="d-flex flex-wrap align-items-center gap-1">
+                            {% if u.allow_civil is not defined or u.allow_civil %}
+                            <span class="badge bg-primary" title="เปิดสิทธิ์แปลง ท.ร.14/1"><i class="bi bi-person-vcard me-1"></i>สิทธิ์ ท.ร.</span>
+                            {% else %}
+                            <span class="badge bg-light text-muted border text-decoration-line-through" title="ปิดสิทธิ์แปลง ท.ร.14/1">สิทธิ์ ท.ร.</span>
+                            {% endif %}
+
+                            {% if u.allow_land is not defined or u.allow_land %}
+                            <span class="badge bg-warning text-dark" title="เปิดสิทธิ์แปลงที่ดิน"><i class="bi bi-geo-alt-fill me-1"></i>สิทธิ์ที่ดิน</span>
+                            {% else %}
+                            <span class="badge bg-light text-muted border text-decoration-line-through" title="ปิดสิทธิ์แปลงที่ดิน">สิทธิ์ที่ดิน</span>
+                            {% endif %}
+
+                            <button type="button" class="btn btn-sm btn-outline-dark py-0 px-2 ms-1"
+                                    style="font-size: 0.75rem;"
+                                    title="แก้ไขสิทธิ์แปลง ท.ร. / สิทธิ์แปลงที่ดิน"
+                                    onclick="openPermissionsModal({{ u.id }}, '{{ u.username }}', {{ 1 if (u.allow_civil is not defined or u.allow_civil) else 0 }}, {{ 1 if (u.allow_land is not defined or u.allow_land) else 0 }})">
+                                <i class="bi bi-sliders me-1"></i>ตั้งค่าสิทธิ์
+                            </button>
+                        </div>
+                        {% endif %}
                     </td>
                     <td class="text-center">
                         {% if u.status == 'active' %}
@@ -144,18 +185,24 @@
                         <div class="btn-group btn-group-sm">
                             <!-- If pending, show Approve button -->
                             {% if u.status == 'pending' %}
-                            <button class="btn btn-sm btn-success" onclick="approveUser({{ u.id }}, '{{ u.username }}', '{{ u.plan_name }}')">
+                            <button class="btn btn-sm btn-success" onclick="approveUser({{ u.id }}, '{{ u.username }}', '{{ u.plan_name }}', {{ 1 if (u.allow_civil is not defined or u.allow_civil) else 0 }}, {{ 1 if u.allow_land else 0 }})">
                                 <i class="bi bi-check-circle me-1"></i> อนุมัติ
                             </button>
                             {% else %}
                             <!-- Toggle Suspend Button -->
                             <button class="btn {{ 'btn-outline-danger' if u.status == 'active' else 'btn-outline-success' }}" 
-                                    title="{{ 'ระงับการใช้งาน' if u.status == 'active' else 'เปิดใช้งาน' }}"
-                                    onclick="toggleUserStatus({{ u.id }}, '{{ u.username }}', '{{ u.status }}')">
+                                     title="{{ 'ระงับการใช้งาน' if u.status == 'active' else 'เปิดใช้งาน' }}"
+                                     onclick="toggleUserStatus({{ u.id }}, '{{ u.username }}', '{{ u.status }}')">
                                 <i class="bi {{ 'bi-slash-circle' if u.status == 'active' else 'bi-check-circle' }} me-1"></i>
                                 {{ 'ระงับใช้' if u.status == 'active' else 'ปลดระงับ' }}
                             </button>
                             {% endif %}
+                            <!-- Permission Settings Button -->
+                            <button class="btn btn-outline-dark"
+                                    title="กำหนดสิทธิ์ แปลง ท.ร. / แปลงที่ดิน"
+                                    onclick="openPermissionsModal({{ u.id }}, '{{ u.username }}', {{ 1 if (u.allow_civil is not defined or u.allow_civil) else 0 }}, {{ 1 if (u.allow_land is not defined or u.allow_land) else 0 }})">
+                                <i class="bi bi-sliders"></i>
+                            </button>
                             <!-- Extend Subscription Button -->
                             <button class="btn btn-outline-primary" 
                                     title="ต่ออายุสัญญาเช่า / ปรับแพ็กเกจ"
@@ -225,6 +272,25 @@
                             <option value="rental_1y">เช่า 1 ปี (25,000 บาท)</option>
                             <option value="lifetime" selected>ซื้อขาด (ตลอดชีพ)</option>
                         </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-dark">กำหนดสิทธิ์การใช้งานระบบ (เลือกแยกกัน หรือเลือกทั้งคู่ได้) <span class="text-danger">*</span></label>
+                        <div class="border rounded-3 p-3 bg-light">
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" name="allow_civil" value="1" id="addAllowCivil" checked>
+                                <label class="form-check-label fw-medium" for="addAllowCivil">
+                                    <span class="badge bg-primary me-1"><i class="bi bi-person-vcard"></i> สิทธิ์แปลง ท.ร.14/1</span>
+                                    แปลงเอกสารทะเบียนราษฎร (แบบไม่รับรอง & แบบรับรอง)
+                                </label>
+                            </div>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="allow_land" value="1" id="addAllowLand" checked>
+                                <label class="form-check-label fw-medium" for="addAllowLand">
+                                    <span class="badge bg-warning text-dark me-1"><i class="bi bi-geo-alt-fill"></i> สิทธิ์แปลงที่ดิน</span>
+                                    แปลงข้อมูลที่ดิน (25 คอลัมน์) & รวมไฟล์ PDF ที่ดิน
+                                </label>
+                            </div>
+                        </div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label small fw-medium">บทบาท (Role)</label>
@@ -356,25 +422,102 @@
         </div>
     </div>
 </div>
+
+<!-- Modal: Edit User Permissions (สิทธิ์แปลง ท.ร. / สิทธิ์แปลงที่ดิน) -->
+<div class="modal fade" id="permissionsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-light">
+                <h5 class="modal-title fw-bold">
+                    <i class="bi bi-sliders text-primary me-2"></i> ตั้งค่าสิทธิ์การใช้งาน (ท.ร.14/1 & ที่ดิน)
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="permUserId">
+                <p class="mb-3">กำหนดสิทธิ์การใช้งานแยกตามระบบสำหรับผู้ใช้: <strong id="permUsername" class="text-primary fs-5"></strong></p>
+
+                <div class="border rounded-3 p-3 bg-light mb-2">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="permAllowCivil" style="transform: scale(1.2);">
+                        <label class="form-check-label ms-2" for="permAllowCivil" style="cursor: pointer;">
+                            <div class="fw-bold text-primary"><i class="bi bi-person-vcard me-1"></i> สิทธิ์แปลงไฟล์ ท.ร.14/1 (ทะเบียนราษฎร)</div>
+                            <div class="small text-muted">อนุญาตให้ใช้งานระบบแปลงไฟล์ ท.ร.14/1 ทั้งแบบไม่รับรองและแบบรับรอง</div>
+                        </label>
+                    </div>
+                    <hr class="my-2">
+                    <div class="form-check form-switch mt-3">
+                        <input class="form-check-input" type="checkbox" id="permAllowLand" style="transform: scale(1.2);">
+                        <label class="form-check-label ms-2" for="permAllowLand" style="cursor: pointer;">
+                            <div class="fw-bold text-warning-emphasis"><i class="bi bi-geo-alt-fill text-warning me-1"></i> สิทธิ์แปลงไฟล์ข้อมูลที่ดิน & รวมไฟล์โฉนด</div>
+                            <div class="small text-muted">อนุญาตให้ใช้งานระบบแปลงไฟล์ที่ดิน (25 คอลัมน์) และเมนูรวม/จัดเรียงไฟล์ PDF ที่ดิน</div>
+                        </label>
+                    </div>
+                </div>
+                <div class="small text-muted">
+                    <i class="bi bi-info-circle me-1"></i> สามารถเลือกเปิดเฉพาะสิทธิ์ ท.ร. อย่างเดียว, เฉพาะสิทธิ์ที่ดินอย่างเดียว, หรือเปิดทั้ง 2 สิทธิ์พร้อมกันได้ทันที
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+                <button type="button" class="btn btn-primary" onclick="submitPermissions()">
+                    <i class="bi bi-check2-circle me-1"></i> บันทึกสิทธิ์การใช้งาน
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-    async function approveUser(userId, username, planName) {
-        const result = await Swal.fire({
-            title: 'อนุมัติการใช้งาน?',
-            text: `ต้องการอนุมัติบัญชีผู้ใช้ "${username}" (${planName}) หรือไม่? ระบบจะเริ่มนับอายุการใช้งานและเปิดสิทธิ์ให้เข้าสู่ระบบได้ทันที`,
+    async function approveUser(userId, username, planName, defaultCivil = 1, defaultLand = 0) {
+        const { value: formValues, isConfirmed } = await Swal.fire({
+            title: 'อนุมัติการใช้งาน & กำหนดสิทธิ์',
+            html: `
+                <div class="text-start">
+                    <p class="mb-2">อนุมัติบัญชีผู้ใช้ <strong class="text-primary">${username}</strong> (${planName})</p>
+                    <div class="border rounded-3 p-3 bg-light mt-2">
+                        <div class="fw-bold small mb-2 text-dark">เลือกสิทธิ์ที่อนุญาตให้ใช้งาน:</div>
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" id="swalApproveCivil" ${defaultCivil ? 'checked' : ''}>
+                            <label class="form-check-label fw-medium" for="swalApproveCivil">
+                                <span class="badge bg-primary">สิทธิ์แปลง ท.ร.14/1</span> (ทะเบียนราษฎร)
+                            </label>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="swalApproveLand" ${defaultLand ? 'checked' : ''}>
+                            <label class="form-check-label fw-medium" for="swalApproveLand">
+                                <span class="badge bg-warning text-dark">สิทธิ์แปลงที่ดิน</span> (แปลง 25 คอลัมน์ & รวมไฟล์)
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            `,
             icon: 'question',
             showCancelButton: true,
             confirmButtonColor: '#0e9f6e',
             cancelButtonColor: '#6c757d',
             confirmButtonText: 'ใช่, อนุมัติทันที!',
-            cancelButtonText: 'ยกเลิก'
+            cancelButtonText: 'ยกเลิก',
+            preConfirm: () => {
+                const ac = document.getElementById('swalApproveCivil').checked ? 1 : 0;
+                const al = document.getElementById('swalApproveLand').checked ? 1 : 0;
+                if (!ac && !al) {
+                    Swal.showValidationMessage('กรุณาเลือกเปิดสิทธิ์อย่างน้อย 1 ระบบ');
+                    return false;
+                }
+                return { allow_civil: ac, allow_land: al };
+            }
         });
 
-        if (result.isConfirmed) {
+        if (isConfirmed && formValues) {
             try {
-                const response = await fetch(`/admin/users/approve/${userId}`, { method: 'POST' });
+                const response = await fetch(`/admin/users/approve/${userId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formValues)
+                });
                 const data = await response.json();
                 if (data.success) {
                     await Swal.fire({ icon: 'success', title: 'อนุมัติสำเร็จ', text: data.message, timer: 1500, showConfirmButton: false });
@@ -385,6 +528,43 @@
             } catch (err) {
                 Swal.fire({ icon: 'error', text: err.message });
             }
+        }
+    }
+
+    function openPermissionsModal(userId, username, allowCivil, allowLand) {
+        document.getElementById('permUserId').value = userId;
+        document.getElementById('permUsername').textContent = username;
+        document.getElementById('permAllowCivil').checked = Boolean(allowCivil);
+        document.getElementById('permAllowLand').checked = Boolean(allowLand);
+        new bootstrap.Modal(document.getElementById('permissionsModal')).show();
+    }
+
+    async function submitPermissions() {
+        const userId = document.getElementById('permUserId').value;
+        const allowCivil = document.getElementById('permAllowCivil').checked ? 1 : 0;
+        const allowLand = document.getElementById('permAllowLand').checked ? 1 : 0;
+
+        if (!allowCivil && !allowLand) {
+            Swal.fire({ icon: 'warning', text: 'กรุณาเลือกเปิดสิทธิ์อย่างน้อย 1 ระบบ (สิทธิ์แปลง ท.ร. หรือ สิทธิ์แปลงที่ดิน)' });
+            return;
+        }
+
+        try {
+            const resp = await fetch(`/admin/users/permissions/${userId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ allow_civil: allowCivil, allow_land: allowLand })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                bootstrap.Modal.getInstance(document.getElementById('permissionsModal')).hide();
+                await Swal.fire({ icon: 'success', title: 'บันทึกสิทธิ์สำเร็จ', text: data.message, timer: 1500, showConfirmButton: false });
+                location.reload();
+            } else {
+                Swal.fire({ icon: 'error', text: data.message });
+            }
+        } catch (err) {
+            Swal.fire({ icon: 'error', text: err.message });
         }
     }
 

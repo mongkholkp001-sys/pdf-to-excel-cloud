@@ -89,9 +89,23 @@ def init_db():
             full_name TEXT NOT NULL, phone TEXT, plan_type TEXT DEFAULT 'lifetime',
             plan_name TEXT DEFAULT 'ซื้อขาด', role TEXT NOT NULL DEFAULT 'user',
             status TEXT NOT NULL DEFAULT 'active', expires_at TIMESTAMP, approved_at TIMESTAMP,
+            allow_civil INTEGER NOT NULL DEFAULT 1, allow_land INTEGER NOT NULL DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, last_login TIMESTAMP
         )
     """)
+
+    # Safe schema migration for allow_civil and allow_land on existing databases
+    if USE_POSTGRES:
+        cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS allow_civil INTEGER NOT NULL DEFAULT 1")
+        cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS allow_land INTEGER NOT NULL DEFAULT 1")
+    else:
+        cursor.execute("PRAGMA table_info(users)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        if 'allow_civil' not in existing_cols:
+            cursor.execute("ALTER TABLE users ADD COLUMN allow_civil INTEGER NOT NULL DEFAULT 1")
+        if 'allow_land' not in existing_cols:
+            cursor.execute("ALTER TABLE users ADD COLUMN allow_land INTEGER NOT NULL DEFAULT 1")
+
     cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS conversion_logs (
             id {id_def}, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -131,8 +145,8 @@ def init_db():
         initial_admin_password = os.environ.get('ADMIN_INITIAL_PASSWORD', '2512044')
         admin_pass = generate_password_hash(initial_admin_password)
         cursor.execute("""
-            INSERT INTO users (username, password_hash, full_name, role, status, plan_type, plan_name, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO users (username, password_hash, full_name, role, status, plan_type, plan_name, allow_civil, allow_land, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
         """, ('admin', admin_pass, 'ผู้ดูแลระบบ (Admin)', 'admin', 'active', 'lifetime', 'ผู้ดูแลระบบ', datetime.now()))
         print('Initial admin user created.')
 
@@ -177,16 +191,20 @@ def authenticate_user(username, password):
     conn.close()
     return dict(user), None
 
-def register_user(username, password, full_name, phone, plan_type):
+def register_user(username, password, full_name, phone, plan_type, allow_civil=1, allow_land=0):
     conn = get_db()
     cursor = conn.cursor()
     try:
         pw_hash = generate_password_hash(password)
         plan_info = PLANS.get(plan_type, PLANS['rental_1m'])
+        ac = 1 if allow_civil else 0
+        al = 1 if allow_land else 0
+        if ac == 0 and al == 0:
+            ac = 1
         cursor.execute('''
-            INSERT INTO users (username, password_hash, full_name, phone, plan_type, plan_name, role, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, 'user', 'pending', ?)
-        ''', (username, pw_hash, full_name, phone, plan_type, plan_info['name'], datetime.now()))
+            INSERT INTO users (username, password_hash, full_name, phone, plan_type, plan_name, role, status, allow_civil, allow_land, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'user', 'pending', ?, ?, ?)
+        ''', (username, pw_hash, full_name, phone, plan_type, plan_info['name'], ac, al, datetime.now()))
         conn.commit()
         return True, "สมัครสมาชิกเรียบร้อยแล้ว บัญชีของคุณอยู่ระหว่างรอผู้ดูแลระบบอนุมัติการใช้งาน"
     except INTEGRITY_ERRORS:
@@ -196,7 +214,7 @@ def register_user(username, password, full_name, phone, plan_type):
     finally:
         conn.close()
 
-def approve_user(user_id, custom_days=None):
+def approve_user(user_id, custom_days=None, allow_civil=None, allow_land=None):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
@@ -213,11 +231,16 @@ def approve_user(user_id, custom_days=None):
     if days is not None:
         expires_at = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
         
+    ac = int(bool(allow_civil)) if allow_civil is not None else int(user['allow_civil'] if 'allow_civil' in user.keys() and user['allow_civil'] is not None else 1)
+    al = int(bool(allow_land)) if allow_land is not None else int(user['allow_land'] if 'allow_land' in user.keys() and user['allow_land'] is not None else 0)
+    if ac == 0 and al == 0:
+        ac = 1
+
     cursor.execute('''
         UPDATE users 
-        SET status = 'active', approved_at = ?, expires_at = ?
+        SET status = 'active', approved_at = ?, expires_at = ?, allow_civil = ?, allow_land = ?
         WHERE id = ?
-    ''', (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), expires_at, user_id))
+    ''', (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), expires_at, ac, al, user_id))
     conn.commit()
     conn.close()
     return True, f"อนุมัติผู้ใช้ '{user['username']}' เรียบร้อยแล้ว (แพ็กเกจ: {plan_info['name']})"
@@ -301,7 +324,7 @@ def get_pending_users():
     conn.close()
     return users
 
-def create_user(username, password, full_name, role='user', plan_type='lifetime', phone=''):
+def create_user(username, password, full_name, role='user', plan_type='lifetime', phone='', allow_civil=1, allow_land=1):
     conn = get_db()
     cursor = conn.cursor()
     try:
@@ -312,10 +335,18 @@ def create_user(username, password, full_name, role='user', plan_type='lifetime'
         if days is not None:
             expires_at = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
             
+        if role == 'admin':
+            ac, al = 1, 1
+        else:
+            ac = 1 if allow_civil else 0
+            al = 1 if allow_land else 0
+            if ac == 0 and al == 0:
+                return False, "กรุณาเลือกเปิดสิทธิ์การใช้งานอย่างน้อย 1 ระบบ (สิทธิ์แปลง ท.ร. หรือ สิทธิ์แปลงที่ดิน)"
+
         cursor.execute('''
-            INSERT INTO users (username, password_hash, full_name, phone, plan_type, plan_name, role, status, expires_at, created_at, approved_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
-        ''', (username, pw_hash, full_name, phone, plan_type, plan_info['name'], role, expires_at, datetime.now(), datetime.now()))
+            INSERT INTO users (username, password_hash, full_name, phone, plan_type, plan_name, role, status, expires_at, allow_civil, allow_land, created_at, approved_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
+        ''', (username, pw_hash, full_name, phone, plan_type, plan_info['name'], role, expires_at, ac, al, datetime.now(), datetime.now()))
         conn.commit()
         return True, "สร้างผู้ใช้งานสำเร็จ"
     except INTEGRITY_ERRORS:
@@ -324,6 +355,36 @@ def create_user(username, password, full_name, role='user', plan_type='lifetime'
         return False, str(e)
     finally:
         conn.close()
+
+def update_user_permissions(user_id, allow_civil, allow_land):
+    """อัปเดตสิทธิ์การใช้งานแยกกันระหว่าง สิทธิ์แปลง ท.ร.14/1 และ สิทธิ์แปลงที่ดิน"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT username, role FROM users WHERE id = ?', (user_id,))
+    user = cursor.fetchone()
+    if not user:
+        conn.close()
+        return False, "ไม่พบผู้ใช้งาน"
+    if user['role'] == 'admin':
+        conn.close()
+        return False, "บัญชีผู้ดูแลระบบ (Admin) มีสิทธิ์ใช้งานครบทุกระบบอยู่แล้ว"
+
+    ac = 1 if allow_civil else 0
+    al = 1 if allow_land else 0
+    if ac == 0 and al == 0:
+        conn.close()
+        return False, "กรุณาเลือกเปิดสิทธิ์การใช้งานอย่างน้อย 1 ระบบ (สิทธิ์แปลง ท.ร. หรือ สิทธิ์แปลงที่ดิน)"
+
+    cursor.execute('UPDATE users SET allow_civil = ?, allow_land = ? WHERE id = ?', (ac, al, user_id))
+    conn.commit()
+    conn.close()
+
+    perms = []
+    if ac:
+        perms.append("สิทธิ์แปลง ท.ร.14/1")
+    if al:
+        perms.append("สิทธิ์แปลงที่ดิน")
+    return True, f"อัปเดตสิทธิ์ของ '{user['username']}' เป็น [{', '.join(perms)}] เรียบร้อยแล้ว"
 
 def toggle_user_status(user_id):
     conn = get_db()

@@ -49,9 +49,11 @@
                 </p>
             </div>
             <div class="d-flex gap-2">
+                {% if can_land %}
                 <a href="{{ url_for('pdf_merger') }}" class="btn btn-warning fw-medium shadow-sm">
                     <i class="bi bi-files me-1"></i> เมนูรวม & จัดเรียงไฟล์ PDF ที่ดิน
                 </a>
+                {% endif %}
                 <a href="{{ url_for('history') }}" class="btn btn-outline-secondary">
                     <i class="bi bi-clock-history me-1"></i> ประวัติการแปลงไฟล์
                 </a>
@@ -80,28 +82,37 @@
             <div class="card-body p-2 bg-light rounded-3">
                 <div class="row g-2">
                     <div class="col-md-4">
-                        <button type="button" class="btn w-100 py-3 text-start d-flex align-items-center mode-btn {{ 'btn-primary text-white shadow-sm' if active_doc_type == 'uncertified' else 'btn-outline-secondary bg-white' }}" id="modeUncertifiedBtn" onclick="switchMode('uncertified')">
-                            <i class="bi bi-file-earmark-text fs-2 me-3 {{ 'text-white' if active_doc_type == 'uncertified' else 'text-primary' }}" id="iconUncert"></i>
+                        <button type="button" class="btn w-100 py-3 text-start d-flex align-items-center mode-btn {{ 'btn-primary text-white shadow-sm' if active_doc_type == 'uncertified' else 'btn-outline-secondary bg-white' }}" id="modeUncertifiedBtn" onclick="switchMode('uncertified')" {% if not can_civil %}style="opacity: 0.65;"{% endif %}>
+                            <i class="bi {{ 'bi-file-earmark-text' if can_civil else 'bi-lock-fill' }} fs-2 me-3 {{ 'text-white' if active_doc_type == 'uncertified' else ('text-primary' if can_civil else 'text-secondary') }}" id="iconUncert"></i>
                             <div>
-                                <div class="fw-bold fs-6">1. แบบไม่รับรอง (ท.ร.14/1)</div>
+                                <div class="fw-bold fs-6">
+                                    1. แบบไม่รับรอง (ท.ร.14/1)
+                                    {% if not can_civil %}<span class="badge bg-secondary ms-1">ไม่มีสิทธิ์ ท.ร.</span>{% endif %}
+                                </div>
                                 <small class="{{ 'text-white-50' if active_doc_type == 'uncertified' else 'text-muted' }}" id="subUncert">มาตรฐาน ท.ร. 14/1 ทั่วไป</small>
                             </div>
                         </button>
                     </div>
                     <div class="col-md-4">
-                        <button type="button" class="btn w-100 py-3 text-start d-flex align-items-center mode-btn {{ 'btn-success text-white shadow-sm' if active_doc_type == 'certified' else 'btn-outline-secondary bg-white' }}" id="modeCertifiedBtn" onclick="switchMode('certified')">
-                            <i class="bi bi-award fs-2 me-3 {{ 'text-white' if active_doc_type == 'certified' else 'text-success' }}" id="iconCert"></i>
+                        <button type="button" class="btn w-100 py-3 text-start d-flex align-items-center mode-btn {{ 'btn-success text-white shadow-sm' if active_doc_type == 'certified' else 'btn-outline-secondary bg-white' }}" id="modeCertifiedBtn" onclick="switchMode('certified')" {% if not can_civil %}style="opacity: 0.65;"{% endif %}>
+                            <i class="bi {{ 'bi-award' if can_civil else 'bi-lock-fill' }} fs-2 me-3 {{ 'text-white' if active_doc_type == 'certified' else ('text-success' if can_civil else 'text-secondary') }}" id="iconCert"></i>
                             <div>
-                                <div class="fw-bold fs-6">2. แบบรับรอง (ท.ร.14/1)</div>
+                                <div class="fw-bold fs-6">
+                                    2. แบบรับรอง (ท.ร.14/1)
+                                    {% if not can_civil %}<span class="badge bg-secondary ms-1">ไม่มีสิทธิ์ ท.ร.</span>{% endif %}
+                                </div>
                                 <small class="{{ 'text-white-50' if active_doc_type == 'certified' else 'text-muted' }}" id="subCert">มีตราประทับนายทะเบียน & ลายเซ็น</small>
                             </div>
                         </button>
                     </div>
                     <div class="col-md-4">
-                        <button type="button" class="btn w-100 py-3 text-start d-flex align-items-center mode-btn {{ 'btn-warning text-dark shadow-sm' if active_doc_type == 'land' else 'btn-outline-secondary bg-white' }}" id="modeLandBtn" onclick="switchMode('land')">
-                            <i class="bi bi-geo-alt-fill fs-2 me-3 {{ 'text-dark' if active_doc_type == 'land' else 'text-warning' }}" id="iconLand"></i>
+                        <button type="button" class="btn w-100 py-3 text-start d-flex align-items-center mode-btn {{ 'btn-warning text-dark shadow-sm' if active_doc_type == 'land' else 'btn-outline-secondary bg-white' }}" id="modeLandBtn" onclick="switchMode('land')" {% if not can_land %}style="opacity: 0.65;"{% endif %}>
+                            <i class="bi {{ 'bi-geo-alt-fill' if can_land else 'bi-lock-fill' }} fs-2 me-3 {{ 'text-dark' if active_doc_type == 'land' else ('text-warning' if can_land else 'text-secondary') }}" id="iconLand"></i>
                             <div>
-                                <div class="fw-bold fs-6">3. แปลงไฟล์ที่ดิน (23 คอลัมน์)</div>
+                                <div class="fw-bold fs-6">
+                                    3. แปลงไฟล์ที่ดิน (25 คอลัมน์)
+                                    {% if not can_land %}<span class="badge bg-secondary ms-1">ไม่มีสิทธิ์ที่ดิน</span>{% endif %}
+                                </div>
                                 <small class="{{ 'text-dark' if active_doc_type == 'land' else 'text-muted' }}" id="subLand">โฉนด / น.ส.3 / ห้องชุด + เช็คเลขโฉนด</small>
                             </div>
                         </button>
@@ -271,8 +282,26 @@
     const tableSearch = document.getElementById('tableSearch');
 
     let selectedFilesList = [];
+    const CAN_CIVIL = {{ 'true' if can_civil else 'false' }};
+    const CAN_LAND = {{ 'true' if can_land else 'false' }};
 
     function switchMode(mode) {
+        if ((mode === 'uncertified' || mode === 'certified') && !CAN_CIVIL) {
+            Swal.fire({
+                icon: 'warning',
+                title: 'ไม่มีสิทธิ์ใช้งานระบบแปลง ท.ร.14/1',
+                text: 'บัญชีของคุณได้รับสิทธิ์เฉพาะ "ระบบแปลงข้อมูลที่ดิน" เท่านั้น หากต้องการใช้งานระบบแปลง ท.ร.14/1 กรุณาติดต่อผู้ดูแลระบบ (Admin)'
+            });
+            return;
+        }
+        if (mode === 'land' && !CAN_LAND) {
+            Swal.fire({
+                icon: 'warning',
+                title: 'ไม่มีสิทธิ์ใช้งานระบบแปลงข้อมูลที่ดิน',
+                text: 'บัญชีของคุณได้รับสิทธิ์เฉพาะ "ระบบแปลง ท.ร.14/1" เท่านั้น หากต้องการใช้งานระบบแปลงที่ดิน กรุณาติดต่อผู้ดูแลระบบ (Admin)'
+            });
+            return;
+        }
         const input = document.getElementById('docTypeInput');
         input.value = mode;
         

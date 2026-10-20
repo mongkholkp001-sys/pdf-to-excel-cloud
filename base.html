@@ -182,6 +182,7 @@
                             <i class="bi bi-cloud-arrow-up me-1"></i> เมนูแปลงไฟล์ PDF
                         </a>
                         <ul class="dropdown-menu shadow">
+                            {% if can_civil %}
                             <li>
                                 <a class="dropdown-item py-2" href="{{ url_for('dashboard', type='uncertified') }}">
                                     <i class="bi bi-file-earmark-text text-primary me-2 fs-5 align-middle"></i>
@@ -197,21 +198,44 @@
                                     <div class="text-muted small ms-4">มีตราประทับนายทะเบียน & รับรองรายการ</div>
                                 </a>
                             </li>
+                            {% else %}
+                            <li>
+                                <span class="dropdown-item py-2 text-muted" style="cursor: not-allowed; opacity: 0.65;">
+                                    <i class="bi bi-lock-fill text-secondary me-2 fs-5 align-middle"></i>
+                                    <strong>1-2. ระบบแปลงไฟล์ ท.ร.14/1</strong>
+                                    <span class="badge bg-secondary ms-1">ไม่มีสิทธิ์ใช้งาน</span>
+                                    <div class="text-muted small ms-4">บัญชีของคุณไม่ได้เปิดสิทธิ์แปลง ท.ร.</div>
+                                </span>
+                            </li>
+                            {% endif %}
                             <li><hr class="dropdown-divider"></li>
+                            {% if can_land %}
                             <li>
                                 <a class="dropdown-item py-2" href="{{ url_for('dashboard', type='land') }}">
                                     <i class="bi bi-geo-alt-fill text-warning me-2 fs-5 align-middle"></i>
-                                    <strong>3. แปลงไฟล์ข้อมูลที่ดิน (23 คอลัมน์)</strong>
+                                    <strong>3. แปลงไฟล์ข้อมูลที่ดิน (25 คอลัมน์)</strong>
                                     <div class="text-muted small ms-4">สืบทรัพย์กรมที่ดิน โฉนด / น.ส.3 / ห้องชุด</div>
                                 </a>
                             </li>
+                            {% else %}
+                            <li>
+                                <span class="dropdown-item py-2 text-muted" style="cursor: not-allowed; opacity: 0.65;">
+                                    <i class="bi bi-lock-fill text-secondary me-2 fs-5 align-middle"></i>
+                                    <strong>3. ระบบแปลงไฟล์ข้อมูลที่ดิน</strong>
+                                    <span class="badge bg-secondary ms-1">ไม่มีสิทธิ์ใช้งาน</span>
+                                    <div class="text-muted small ms-4">บัญชีของคุณไม่ได้เปิดสิทธิ์แปลงที่ดิน</div>
+                                </span>
+                            </li>
+                            {% endif %}
                         </ul>
                     </li>
+                    {% if can_land %}
                     <li class="nav-item">
                         <a class="nav-link text-light {{ 'active' if request.endpoint == 'pdf_merger' }}" href="{{ url_for('pdf_merger') }}">
                             <i class="bi bi-files text-info me-1"></i> รวม & จัดเรียงไฟล์ PDF ที่ดิน
                         </a>
                     </li>
+                    {% endif %}
                     <li class="nav-item">
                         <a class="nav-link text-light {{ 'active' if request.endpoint == 'history' }}" href="{{ url_for('history') }}">
                             <i class="bi bi-clock-history me-1"></i> ประวัติการแปลงไฟล์
@@ -231,6 +255,18 @@
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end shadow">
                             <li><h6 class="dropdown-header">เข้าสู่ระบบในชื่อ: {{ session.get('username') }}</h6></li>
+                            <li class="px-3 pb-2">
+                                <div class="small text-muted mb-1">สิทธิ์การใช้งานของคุณ:</div>
+                                <div class="d-flex flex-wrap gap-1">
+                                    {% if can_civil %}
+                                    <span class="badge bg-primary"><i class="bi bi-person-vcard me-1"></i>สิทธิ์แปลง ท.ร.</span>
+                                    {% endif %}
+                                    {% if can_land %}
+                                    <span class="badge bg-warning text-dark"><i class="bi bi-geo-alt-fill me-1"></i>สิทธิ์แปลงที่ดิน</span>
+                                    {% endif %}
+                                </div>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
                             <li>
                                 <a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#changeMyPasswordModal">
                                     <i class="bi bi-key-fill text-warning me-2"></i> เปลี่ยนรหัสผ่านของฉัน
