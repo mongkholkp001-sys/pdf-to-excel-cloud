@@ -1,0 +1,572 @@
+{% extends "base.html" %}
+
+{% block title %}รวม & จัดเรียงไฟล์ PDF ที่ดิน (ตรวจสอบเลขโฉนด){% endblock %}
+
+{% block extra_css %}
+<style>
+    .drop-zone {
+        border: 2px dashed #f59e0b;
+        border-radius: 14px;
+        padding: 28px 20px;
+        text-align: center;
+        background-color: #fffbeb;
+        transition: all 0.2s ease;
+        cursor: pointer;
+    }
+    .drop-zone:hover, .drop-zone.dragover {
+        border-color: #d97706;
+        background-color: #fef3c7;
+    }
+    .sticky-action-bar {
+        position: sticky;
+        top: 10px;
+        z-index: 1020;
+        background: rgba(255, 255, 255, 0.97);
+        backdrop-filter: blur(8px);
+        border: 2px solid #cbd5e1;
+        border-radius: 12px;
+        padding: 14px 18px;
+        box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.1);
+    }
+    .file-queue-scroll {
+        max-height: 460px;
+        overflow-y: auto;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 10px;
+        background-color: #f8fafc;
+    }
+    .file-item {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 8px 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 6px;
+        transition: all 0.15s;
+    }
+    .file-item:hover {
+        border-color: #94a3b8;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.04);
+    }
+    .file-item.summary-guess {
+        border-left: 4px solid #0e9f6e;
+    }
+    .file-item.detail-guess {
+        border-left: 4px solid #3b82f6;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-11">
+        <!-- Header -->
+        <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+            <div>
+                <h3 class="fw-bold mb-1">
+                    <i class="bi bi-files text-warning me-2"></i>รวมไฟล์ PDF ที่ดิน & จัดเรียงหน้าตามเลขโฉนดอัตโนมัติ
+                </h3>
+                <p class="text-muted mb-0">
+                    ระบบจับคู่ <strong>หน้าสรุปหลักทรัพย์หน้าแรก &rarr; ตามด้วยหน้ารายละเอียดของแต่ละแปลงตามลำดับเลขโฉนด</strong> โดยไม่กระโดดข้ามรายชื่อ พร้อมแจ้งเตือนส่วนที่ขาดหาย
+                </p>
+            </div>
+            <div>
+                <a href="{{ url_for('dashboard', type='land') }}" class="btn btn-outline-primary">
+                    <i class="bi bi-arrow-left me-1"></i> กลับไปหน้าแปลงไฟล์ที่ดิน
+                </a>
+            </div>
+        </div>
+
+        <!-- TOP STICKY CONTROL BAR (Always at the top when files are selected) -->
+        <div id="topControlBar" class="sticky-action-bar mb-3 d-none">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+                <!-- Left: Main Merge Button & Counter -->
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <button type="button" class="btn btn-success btn-lg px-3 shadow-sm fw-bold" id="startMergeBtnTop" onclick="runMergeAndCheck(false)">
+                        <i class="bi bi-magic me-1"></i> รวมไฟล์ PDF (<span id="topBtnFileCount">0</span> ไฟล์) + จัดเรียงตามเลขโฉนด
+                    </button>
+                    <button type="button" class="btn btn-primary btn-lg px-3 shadow-sm fw-bold" id="startMergeAndConvertBtnTop" onclick="runMergeAndCheck(true)" title="รวมไฟล์ จัดเรียงตามเลขโฉนด และส่งไปเปิดหน้าตารางแปลงไฟล์ที่ดิน 25 คอลัมน์ทันที">
+                        <i class="bi bi-send-check-fill me-1"></i> รวมไฟล์ + ส่งไปแปลงทันที
+                    </button>
+                    <button type="button" class="btn btn-warning text-dark fw-semibold" onclick="document.getElementById('mergePdfInput').click();">
+                        <i class="bi bi-plus-circle me-1"></i> เพิ่มไฟล์
+                    </button>
+                    <button type="button" class="btn btn-outline-danger" onclick="clearAllFiles()">
+                        <i class="bi bi-trash me-1"></i> ล้างทั้งหมด
+                    </button>
+                </div>
+
+                <!-- Right: Sorting Toolbar Menu -->
+                <div class="d-flex flex-wrap align-items-center gap-2 bg-light p-2 rounded-3 border">
+                    <span class="fw-bold text-secondary small me-1">
+                        <i class="bi bi-sort-alpha-down text-primary me-1"></i>เมนูจัดเรียงไฟล์:
+                    </span>
+                    <button type="button" class="btn btn-sm btn-primary fw-medium" onclick="sortFilesSmart()" title="จัดกลุ่มตามชื่อบุคคล และเรียงเลข 1, 2, 3 ตามธรรมชาติ (เช่น นายปัญญา 1 -> 2 -> 3)">
+                        <i class="bi bi-stars me-1"></i> จัดกลุ่มรายชื่อ + เรียงเลข 1,2,3 (แนะนำ)
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="sortFilesAZ(true)" title="เรียงชื่อไฟล์ ก-ฮ, A-Z และเลข 1-99">
+                        <i class="bi bi-sort-alpha-down me-1"></i> เรียงชื่อ ก-ฮ (1&rarr;9)
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="sortFilesAZ(false)" title="เรียงย้อนกลับ ฮ-ก, Z-A">
+                        <i class="bi bi-sort-alpha-up-alt me-1"></i> เรียงย้อนกลับ
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="sortFilesByTime()" title="เรียงตามวันที่แก้ไขไฟล์">
+                        <i class="bi bi-clock me-1"></i> ตามเวลาไฟล์
+                    </button>
+                </div>
+            </div>
+
+            <!-- Sorting Mode Option for PDF Merge Engine -->
+            <div class="mt-2 pt-2 border-top d-flex flex-wrap align-items-center justify-content-between small text-muted gap-2">
+                <div>
+                    <i class="bi bi-shield-check text-success me-1"></i>
+                    <strong>โหมดป้องกันข้อมูลกระโดด:</strong> ระบบจะล็อกรายชื่อแต่ละคนไว้ด้วยกัน โดยเรียง <code>[หน้าสรุปของคนนั้น] &rarr; [หน้ารายละเอียดโฉนดแปลงที่ 1, 2, 3... ตามลำดับในตารางหน้าแรก]</code>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <label class="fw-semibold text-dark mb-0">รูปแบบการรวมหน้า:</label>
+                    <select id="mergeSortStrategy" class="form-select form-select-sm" style="width: auto;">
+                        <option value="smart_deed" selected>1. จับคู่หน้าแรก + เรียงรายละเอียดตามเลขโฉนดอัตโนมัติ (แนะนำ)</option>
+                        <option value="strict_file_order">2. เรียงตามลำดับไฟล์ที่แสดงในรายการด้านล่างเป๊ะๆ + เช็คเลขโฉนด</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Output & Validation Report Section (Appears right below Top Bar so user sees it immediately!) -->
+        <div id="mergeResultSection" class="d-none mb-4">
+            <!-- Summary & Download Buttons -->
+            <div class="card p-4 mb-3 shadow-sm border-0 bg-white" style="border-left: 5px solid #0e9f6e !important;">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+                    <div>
+                        <h4 class="fw-bold text-success mb-1">
+                            <i class="bi bi-check2-circle me-1"></i> รวมไฟล์และจัดเรียงตามเลขโฉนดเสร็จสมบูรณ์!
+                        </h4>
+                        <div class="text-muted" id="mergeSummaryStats"></div>
+                    </div>
+                    <div class="d-flex flex-wrap gap-2">
+                        <a href="#" id="btnSendToConverter" class="btn btn-primary btn-lg shadow-sm fw-bold">
+                            <i class="bi bi-send-check-fill me-1"></i> ส่งไปหน้าแปลงไฟล์ที่ดินทันที (ดูตาราง 25 คอลัมน์)
+                        </a>
+                        <a href="#" id="btnDownloadMergedPdf" class="btn btn-danger btn-lg shadow-sm fw-bold">
+                            <i class="bi bi-file-earmark-pdf-fill me-1"></i> ดาวน์โหลดไฟล์ PDF ที่รวมและเรียงแล้ว
+                        </a>
+                        <a href="#" id="btnDownloadMergedExcel" class="btn btn-success btn-lg shadow-sm fw-bold">
+                            <i class="bi bi-file-earmark-excel-fill me-1"></i> ดาวน์โหลดไฟล์ Excel (25 คอลัมน์)
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Discrepancy Alert Box -->
+            <div class="card p-4 mb-4 shadow-sm border-0" id="reportAlertCard">
+                <h5 class="fw-bold mb-3">
+                    <i class="bi bi-clipboard-data me-2 text-primary"></i> รายงานการตรวจสอบความสัมพันธ์ (หน้าแรก vs รายละเอียดแต่ละแปลง)
+                </h5>
+                <div id="reportAlertContent"></div>
+
+                <!-- Per-Person Breakdown -->
+                <h6 class="fw-bold mt-4 mb-2 text-secondary">รายละเอียดการจัดเรียงรายบุคคล (ตามลำดับหน้าแรกและเลขโฉนด):</h6>
+                <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                    <table class="table table-bordered table-hover align-middle mb-0 font-sarabun small">
+                        <thead class="table-dark" style="position: sticky; top: 0; z-index: 5;">
+                            <tr>
+                                <th class="text-center" style="width: 65px;">ลำดับคน</th>
+                                <th>ชื่อเจ้าของหลักทรัพย์</th>
+                                <th>เลขบัตรประชาชน</th>
+                                <th class="text-center">จำนวนแปลงในหน้าแรก</th>
+                                <th>ลำดับการจัดเรียงหน้า & การจับคู่เลขโฉนด</th>
+                                <th class="text-center" style="width: 110px;">สถานะ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="personSummaryTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Upload & File Queue Card -->
+        <div class="card p-4 mb-4 shadow-sm">
+            <!-- Loading Spinner -->
+            <div id="mergeLoading" class="text-center py-5 d-none">
+                <div class="spinner-border text-warning mb-3" style="width: 3rem; height: 3rem;" role="status"></div>
+                <h5 class="fw-bold">กำลังอ่านเลขโฉนด จัดเรียงหน้า และตรวจสอบความสัมพันธ์ของข้อมูล...</h5>
+                <p class="text-muted small">ระบบกำลังจับคู่หน้าสรุปหลักทรัพย์กับหน้ารายละเอียดแต่ละแปลงตามเลขโฉนด</p>
+            </div>
+
+            <div class="drop-zone" id="mergeDropZone" onclick="document.getElementById('mergePdfInput').click();">
+                <input type="file" id="mergePdfInput" accept=".pdf" multiple class="d-none">
+                <div class="mb-2">
+                    <i class="bi bi-file-earmark-pdf-fill text-danger" style="font-size: 2.8rem;"></i>
+                </div>
+                <h5 class="fw-bold mb-1">คลิกเพื่อเลือกไฟล์ PDF หรือลากไฟล์ทั้งหมดมาวางที่นี่</h5>
+                <p class="text-muted small mb-2">เมื่อเลือกไฟล์แล้ว ระบบจะจัดเรียงชื่อและตัวเลข (เช่น 1, 2, 3...) ให้อัตโนมัติ และมีเมนูจัดเรียงอยู่ด้านบนสุด</p>
+                <button type="button" class="btn btn-warning text-dark fw-bold px-4" onclick="event.stopPropagation(); document.getElementById('mergePdfInput').click();">
+                    <i class="bi bi-folder2-open me-1"></i> เลือกไฟล์ PDF จากเครื่อง
+                </button>
+            </div>
+
+            <!-- Selected Files List with Search & Reordering -->
+            <div id="fileQueueContainer" class="mt-3 d-none">
+                <div class="d-flex flex-wrap justify-content-between align-items-center mb-2 gap-2">
+                    <h6 class="fw-bold mb-0">
+                        <i class="bi bi-list-ol me-1 text-primary"></i> รายการไฟล์ที่เตรียมรวม (<span id="fileCountBadge">0</span> ไฟล์)
+                        <small class="text-muted fw-normal ms-1">- สามารถพิมพ์ลำดับที่ต้องการย้าย หรือกดลูกศรเลื่อนได้</small>
+                    </h6>
+                    <div class="input-group input-group-sm" style="max-width: 280px;">
+                        <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+                        <input type="text" id="fileFilterInput" class="form-control" placeholder="ค้นหาชื่อไฟล์ในรายการ..." oninput="renderFileQueue()">
+                    </div>
+                </div>
+                <div id="fileQueueList" class="file-queue-scroll"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const mergeDropZone = document.getElementById('mergeDropZone');
+    const mergePdfInput = document.getElementById('mergePdfInput');
+    const topControlBar = document.getElementById('topControlBar');
+    const fileQueueContainer = document.getElementById('fileQueueContainer');
+    const fileQueueList = document.getElementById('fileQueueList');
+    const fileCountBadge = document.getElementById('fileCountBadge');
+    const topBtnFileCount = document.getElementById('topBtnFileCount');
+    const mergeLoading = document.getElementById('mergeLoading');
+    const mergeResultSection = document.getElementById('mergeResultSection');
+
+    let queuedFiles = [];
+    const thaiCollator = new Intl.Collator('th', { numeric: true, sensitivity: 'base' });
+
+    ['dragenter', 'dragover'].forEach(evt => {
+        mergeDropZone.addEventListener(evt, (e) => {
+            e.preventDefault();
+            mergeDropZone.classList.add('dragover');
+        });
+    });
+
+    ['dragleave', 'drop'].forEach(evt => {
+        mergeDropZone.addEventListener(evt, (e) => {
+            e.preventDefault();
+            mergeDropZone.classList.remove('dragover');
+        });
+    });
+
+    mergeDropZone.addEventListener('drop', (e) => {
+        if (e.dataTransfer.files.length > 0) {
+            addFilesToQueue(e.dataTransfer.files);
+        }
+    });
+
+    mergePdfInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            addFilesToQueue(e.target.files);
+            mergePdfInput.value = '';
+        }
+    });
+
+    function extractPersonBaseAndNum(filename) {
+        // Strip .pdf
+        let base = filename.replace(/\.pdf$/i, '').trim();
+        // Check if filename ends with number like "นายปัญญา พิศวาท1", "นายปัญญา พิศวาท 2", "นายพวง เผยกลาง(1)"
+        const m = base.match(/^(.+?)[\s_\-\(]*(\d+)[\)]*$/);
+        if (m) {
+            let pName = m[1].trim();
+            const num = parseInt(m[2], 10);
+            // Fix duplicated name in filename like "นายพวง เผยกลางนายพวง เผยกลาง2"
+            const halfLen = Math.floor(pName.length / 2);
+            if (pName.length >= 10 && pName.substring(0, halfLen).trim() === pName.substring(halfLen).trim()) {
+                pName = pName.substring(0, halfLen).trim();
+            }
+            return { personKey: pName, seqNum: num, raw: base };
+        }
+        return { personKey: base, seqNum: 0, raw: base };
+    }
+
+    function addFilesToQueue(fileList) {
+        let added = 0;
+        for (let i = 0; i < fileList.length; i++) {
+            const f = fileList[i];
+            if (f.name.toLowerCase().endsWith('.pdf')) {
+                queuedFiles.push(f);
+                added++;
+            }
+        }
+        if (added === 0) {
+            Swal.fire({ icon: 'warning', title: 'กรุณาเลือกเฉพาะไฟล์ .pdf' });
+            return;
+        }
+        // Automatically apply smart sort so files don't jump around!
+        sortFilesSmart(false);
+    }
+
+    function sortFilesSmart(showToast = true) {
+        queuedFiles.sort((a, b) => {
+            const pa = extractPersonBaseAndNum(a.name);
+            const pb = extractPersonBaseAndNum(b.name);
+            const cmpPerson = thaiCollator.compare(pa.personKey, pb.personKey);
+            if (cmpPerson !== 0) return cmpPerson;
+            if (pa.seqNum !== pb.seqNum) return pa.seqNum - pb.seqNum;
+            return thaiCollator.compare(a.name, b.name);
+        });
+        renderFileQueue();
+        if (showToast) {
+            Swal.fire({
+                toast: true,
+                position: 'top-end',
+                icon: 'success',
+                title: 'จัดกลุ่มตามชื่อบุคคลและเรียงเลข 1, 2, 3 เรียบร้อยแล้ว',
+                showConfirmButton: false,
+                timer: 1800
+            });
+        }
+    }
+
+    function sortFilesAZ(ascending = true) {
+        queuedFiles.sort((a, b) => {
+            return ascending
+                ? thaiCollator.compare(a.name, b.name)
+                : thaiCollator.compare(b.name, a.name);
+        });
+        renderFileQueue();
+    }
+
+    function sortFilesByTime() {
+        queuedFiles.sort((a, b) => (a.lastModified || 0) - (b.lastModified || 0));
+        renderFileQueue();
+    }
+
+    function jumpToPosition(oldIdx, newPosStr) {
+        const newIdx = parseInt(newPosStr, 10) - 1;
+        if (isNaN(newIdx) || newIdx < 0 || newIdx >= queuedFiles.length || newIdx === oldIdx) {
+            renderFileQueue();
+            return;
+        }
+        const [item] = queuedFiles.splice(oldIdx, 1);
+        queuedFiles.splice(newIdx, 0, item);
+        renderFileQueue();
+    }
+
+    function renderFileQueue() {
+        fileCountBadge.textContent = queuedFiles.length;
+        topBtnFileCount.textContent = queuedFiles.length;
+
+        if (queuedFiles.length === 0) {
+            topControlBar.classList.add('d-none');
+            fileQueueContainer.classList.add('d-none');
+            return;
+        }
+        topControlBar.classList.remove('d-none');
+        fileQueueContainer.classList.remove('d-none');
+        fileQueueList.innerHTML = '';
+
+        const filterKeyword = (document.getElementById('fileFilterInput')?.value || '').trim().toLowerCase();
+
+        queuedFiles.forEach((f, idx) => {
+            if (filterKeyword && !f.name.toLowerCase().includes(filterKeyword)) {
+                return;
+            }
+            const parsed = extractPersonBaseAndNum(f.name);
+            const isFirstFileOfPerson = (parsed.seqNum <= 1);
+
+            const div = document.createElement('div');
+            div.className = `file-item ${isFirstFileOfPerson ? 'summary-guess' : 'detail-guess'}`;
+            div.innerHTML = `
+                <div class="d-flex align-items-center flex-grow-1 me-2">
+                    <input type="number" min="1" max="${queuedFiles.length}" value="${idx + 1}" 
+                           class="form-control form-control-sm text-center fw-bold me-2" 
+                           style="width: 62px;" 
+                           title="พิมพ์เลขลำดับแล้วกด Enter เพื่อย้ายไปยังลำดับนั้นทันที"
+                           onchange="jumpToPosition(${idx}, this.value)">
+                    <i class="bi bi-file-earmark-pdf text-danger fs-5 me-2"></i>
+                    <div>
+                        <div class="fw-bold text-dark">${f.name}</div>
+                        <small class="text-muted">กลุ่มรายชื่อ: <strong>${parsed.personKey}</strong> ${parsed.seqNum > 0 ? `(ไฟล์ที่ ${parsed.seqNum})` : ''} | ${(f.size / 1024).toFixed(1)} KB</small>
+                    </div>
+                </div>
+                <div class="d-flex gap-1 flex-shrink-0">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="moveFile(${idx}, -1)" ${idx === 0 ? 'disabled' : ''} title="เลื่อนขึ้น 1 ลำดับ">
+                        <i class="bi bi-arrow-up"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="moveFile(${idx}, 1)" ${idx === queuedFiles.length - 1 ? 'disabled' : ''} title="เลื่อนลง 1 ลำดับ">
+                        <i class="bi bi-arrow-down"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-danger ms-1" onclick="removeFile(${idx})" title="ลบออก">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+            `;
+            fileQueueList.appendChild(div);
+        });
+    }
+
+    function moveFile(index, dir) {
+        const target = index + dir;
+        if (target < 0 || target >= queuedFiles.length) return;
+        const temp = queuedFiles[index];
+        queuedFiles[index] = queuedFiles[target];
+        queuedFiles[target] = temp;
+        renderFileQueue();
+    }
+
+    function removeFile(index) {
+        queuedFiles.splice(index, 1);
+        renderFileQueue();
+    }
+
+    function clearAllFiles() {
+        queuedFiles = [];
+        renderFileQueue();
+        mergeResultSection.classList.add('d-none');
+    }
+
+    async function runMergeAndCheck(redirectToConvert = false) {
+        if (queuedFiles.length === 0) return;
+
+        const sortStrategy = document.getElementById('mergeSortStrategy')?.value || 'smart_deed';
+        const formData = new FormData();
+        queuedFiles.forEach(f => formData.append('pdf_files', f));
+        formData.append('sort_strategy', sortStrategy);
+
+        mergeLoading.classList.remove('d-none');
+        mergeResultSection.classList.add('d-none');
+        mergeLoading.scrollIntoView({ behavior: 'smooth' });
+
+        try {
+            const res = await fetch("{{ url_for('merge_land_pdf_api') }}", {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+
+            mergeLoading.classList.add('d-none');
+
+            if (!data.success) {
+                Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: data.error || 'ไม่สามารถรวมไฟล์ได้' });
+                return;
+            }
+
+            const rep = data.report;
+            document.getElementById('btnSendToConverter').href = data.convert_page_url || `/dashboard?type=land&merged_id=${data.merged_id}`;
+            document.getElementById('btnDownloadMergedPdf').href = data.merged_pdf_url;
+            document.getElementById('btnDownloadMergedExcel').href = data.excel_url;
+            document.getElementById('mergeSummaryStats').textContent = 
+                `รวมไฟล์ทั้งหมด ${rep.total_files} ไฟล์ (${rep.total_output_pages} หน้า) | ผู้ถือกรรมสิทธิ์ ${rep.total_persons} ราย | จับคู่เลขโฉนดสำเร็จ ${rep.matched_count} แปลง (บันทึกเข้าประวัติเรียบร้อยแล้ว)`;
+
+            const missing = rep.missing_details || [];
+            const orphans = rep.orphan_details || [];
+            let alertHtml = '';
+
+            if (missing.length === 0 && orphans.length === 0) {
+                alertHtml = `
+                    <div class="alert alert-success d-flex align-items-center">
+                        <i class="bi bi-check-circle-fill fs-3 me-3"></i>
+                        <div>
+                            <strong>ตรวจสอบผ่าน 100% ข้อมูลสัมพันธ์กันครบทุกแปลง!</strong>
+                            <div class="small">เลขโฉนดทุกแปลงในตารางสรุปหน้าแรก มีหน้ารายละเอียดครบถ้วน และถูกจัดเรียงต่อท้ายหน้าสรุปของคนนั้นๆ ตามลำดับเรียบร้อยแล้ว</div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                alertHtml = `
+                    <div class="alert alert-danger d-flex align-items-center mb-3">
+                        <i class="bi bi-exclamation-octagon-fill fs-2 me-3"></i>
+                        <div>
+                            <strong>พบรายการที่ไม่สัมพันธ์กัน (ขาดหน้ารายละเอียด ${missing.length} แปลง / ไม่มีหน้าแรกอ้างอิง ${orphans.length} แปลง)!</strong>
+                            <div class="small">ระบบได้จัดเรียงหน้าที่พบให้ตามรายชื่อแล้ว แต่มีรายการที่ไม่ตรงกันตามรีพอร์ทด้านล่างนี้:</div>
+                        </div>
+                    </div>
+                `;
+
+                if (missing.length > 0) {
+                    alertHtml += `<h6 class="fw-bold text-danger"><i class="bi bi-x-circle-fill me-1"></i> 1. มีในตารางหน้าแรก แต่ขาดหน้ารายละเอียดโฉนด (${missing.length} แปลง):</h6>`;
+                    alertHtml += `<ul class="list-group mb-3">`;
+                    missing.forEach(m => {
+                        alertHtml += `<li class="list-group-item list-group-item-danger">
+                            <strong>${m.owner_name} (${m.cid})</strong> - <span class="badge bg-danger">ขาดโฉนดเลขที่ ${m.deed_no}</span> (${m.asset_type}, ${m.land_office})
+                            <div class="small text-dark mt-1">${m.reason} [ไฟล์ต้นทาง: ${m.source_file} หน้า ${m.source_page}]</div>
+                        </li>`;
+                    });
+                    alertHtml += `</ul>`;
+                }
+
+                if (orphans.length > 0) {
+                    alertHtml += `<h6 class="fw-bold text-warning-emphasis"><i class="bi bi-exclamation-triangle-fill me-1"></i> 2. มีหน้ารายละเอียดโฉนด แต่ไม่พบในตารางสรุปหน้าแรก (${orphans.length} แปลง):</h6>`;
+                    alertHtml += `<ul class="list-group mb-3">`;
+                    orphans.forEach(o => {
+                        alertHtml += `<li class="list-group-item list-group-item-warning">
+                            <strong>${o.owner_name} (${o.cid})</strong> - <span class="badge bg-warning text-dark">โฉนดเลขที่ ${o.deed_no}</span> (${o.asset_type})
+                            <div class="small text-dark mt-1">${o.reason} [ไฟล์ต้นทาง: ${o.source_file} หน้า ${o.source_page}]</div>
+                        </li>`;
+                    });
+                    alertHtml += `</ul>`;
+                }
+            }
+
+            document.getElementById('reportAlertContent').innerHTML = alertHtml;
+
+            const tbody = document.getElementById('personSummaryTableBody');
+            tbody.innerHTML = '';
+            (rep.person_summaries || []).forEach(p => {
+                const isOk = (p.missing_deeds || []).length === 0;
+                let deedsHtml = '';
+                (p.matched_deeds || []).forEach(md => {
+                    deedsHtml += `<div class="text-success small mb-1"><i class="bi bi-check-circle-fill me-1"></i>แปลงที่ ${md.seq}: <strong>เลขที่ ${md.deed_no}</strong> (${md.asset_type}) &rarr; ดึงจาก <em>${md.detail_file} (หน้า ${md.detail_page})</em></div>`;
+                });
+                (p.missing_deeds || []).forEach(ms => {
+                    deedsHtml += `<div class="text-danger small fw-bold mb-1"><i class="bi bi-x-circle-fill me-1"></i>แปลงที่ ${ms.seq}: <strong>เลขที่ ${ms.deed_no}</strong> (${ms.asset_type}) &rarr; ขาดหน้ารายละเอียด!</div>`;
+                });
+                if (!deedsHtml) {
+                    deedsHtml = `<span class="text-muted small">ไม่พบทรัพย์สิน</span>`;
+                }
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="text-center fw-bold">${p.seq}</td>
+                    <td class="fw-bold">${p.owner_name}<div class="text-muted small fw-normal">หน้าแรกจาก: ${p.source_file} (หน้า ${p.source_page})</div></td>
+                    <td><code>${p.cid}</code></td>
+                    <td class="text-center fw-bold">${p.expected_count} แปลง</td>
+                    <td>${deedsHtml}</td>
+                    <td class="text-center">
+                        ${isOk 
+                            ? '<span class="badge bg-success"><i class="bi bi-check-lg me-1"></i>ครบถ้วน</span>' 
+                            : `<span class="badge bg-danger"><i class="bi bi-exclamation-triangle me-1"></i>ขาด ${p.missing_deeds.length} แปลง</span>`}
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            mergeResultSection.classList.remove('d-none');
+            mergeResultSection.scrollIntoView({ behavior: 'smooth' });
+
+            if (redirectToConvert && data.convert_page_url) {
+                if (missing.length === 0 && orphans.length === 0) {
+                    window.location.href = data.convert_page_url;
+                } else {
+                    const ask = await Swal.fire({
+                        icon: 'warning',
+                        title: 'พบรายการที่ไม่สัมพันธ์กันบางส่วน',
+                        html: `ขาดหน้ารายละเอียด <strong>${missing.length}</strong> แปลง / ไม่มีหน้าแรกอ้างอิง <strong>${orphans.length}</strong> แปลง<br>ต้องการเปิดหน้าตารางแปลงไฟล์ที่ดิน (25 คอลัมน์) ทันทีเลยหรือไม่?`,
+                        showCancelButton: true,
+                        confirmButtonColor: '#2563eb',
+                        cancelButtonColor: '#6c757d',
+                        confirmButtonText: '<i class="bi bi-send-check-fill me-1"></i> ไปหน้าแปลงไฟล์ทันที',
+                        cancelButtonText: 'ดูรายงานในหน้านี้ก่อน'
+                    });
+                    if (ask.isConfirmed) {
+                        window.location.href = data.convert_page_url;
+                    }
+                }
+            }
+
+        } catch (err) {
+            mergeLoading.classList.add('d-none');
+            Swal.fire({ icon: 'error', title: 'ข้อผิดพลาดการเชื่อมต่อ', text: err.message });
+        }
+    }
+</script>
+{% endblock %}

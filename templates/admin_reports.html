@@ -3,10 +3,10 @@
 {% block title %}รายงานประวัติการแปลงไฟล์ทั้งหมด (Admin Reports){% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
     <div>
         <h3 class="fw-bold mb-1">รายงานประวัติการแปลงไฟล์ทั้งหมด (Audit Log)</h3>
-        <p class="text-muted mb-0">ตรวจสอบและติดตามการใช้งานของทุก User ในระบบ พร้อมดาวน์โหลดไฟล์ผลลัพธ์ย้อนหลัง</p>
+        <p class="text-muted mb-0">ตรวจสอบและติดตามการใช้งานของทุก User ในระบบ พร้อมดาวน์โหลดไฟล์ผลลัพธ์ย้อนหลัง และเลือกลบรายการ (สิทธิ์เฉพาะ Admin)</p>
     </div>
     <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary">
         <i class="bi bi-arrow-left me-1"></i> กลับหน้าแดชบอร์ด
@@ -14,15 +14,26 @@
 </div>
 
 <div class="card p-3 shadow-sm mb-4">
-    <!-- Search / Filter bar -->
-    <div class="row g-2 mb-3">
-        <div class="col-md-6">
+    <!-- Search / Filter & Admin Delete Menu Bar -->
+    <div class="row g-2 align-items-center mb-3">
+        <div class="col-md-5">
             <div class="input-group">
                 <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
                 <input type="text" id="reportSearch" class="form-control" placeholder="ค้นหารายงาน (พิมพ์ชื่อผู้ใช้, ชื่อไฟล์, วันที่)...">
             </div>
         </div>
-        <div class="col-md-6 text-md-end">
+        <div class="col-md-7 d-flex flex-wrap justify-content-md-end align-items-center gap-2">
+            {% if current_user and current_user.role == 'admin' and conversions %}
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAllVisible()" title="เลือกรายการทั้งหมดที่แสดงอยู่ในตาราง">
+                <i class="bi bi-check2-square me-1"></i> เลือกทั้งหมด
+            </button>
+            <button type="button" id="clearSelectBtn" class="btn btn-sm btn-outline-secondary d-none" onclick="clearAllSelection()">
+                <i class="bi bi-x-square me-1"></i> ยกเลิกที่เลือก
+            </button>
+            <button type="button" id="batchDeleteBtn" class="btn btn-sm btn-danger shadow-sm fw-semibold" onclick="confirmBatchDelete()">
+                <i class="bi bi-trash-fill me-1"></i> ลบรายการที่เลือก (<span id="selectedCountBadge">0</span>)
+            </button>
+            {% endif %}
             <span class="badge bg-primary fs-6 p-2">
                 <i class="bi bi-list-check me-1"></i> รายการทั้งหมด {{ conversions|length }} รายการ
             </span>
@@ -34,7 +45,12 @@
         <table class="table table-hover align-middle mb-0" id="reportsTable">
             <thead class="table-light">
                 <tr>
-                    <th style="width: 5%;">#</th>
+                    {% if current_user and current_user.role == 'admin' %}
+                    <th style="width: 42px;" class="text-center">
+                        <input type="checkbox" id="checkAllReports" class="form-check-input" onchange="toggleSelectAll(this)" title="เลือก/ยกเลิกทั้งหมด">
+                    </th>
+                    {% endif %}
+                    <th style="width: 4%;">#</th>
                     <th>ผู้ใช้งาน (User)</th>
                     <th>ชื่อไฟล์ PDF ต้นฉบับ</th>
                     <th class="text-center">จำนวนหน้า</th>
@@ -42,13 +58,18 @@
                     <th class="text-center">สถานะ</th>
                     <th>IP Address</th>
                     <th>วันและเวลาที่ทำรายการ</th>
-                    <th class="text-end">ไฟล์ผลลัพธ์</th>
+                    <th class="text-end">ไฟล์ผลลัพธ์ / การจัดการ</th>
                 </tr>
             </thead>
             <tbody id="reportsTableBody">
                 {% if conversions %}
                     {% for c in conversions %}
-                    <tr>
+                    <tr id="row-conv-{{ c.id }}" class="report-row">
+                        {% if current_user and current_user.role == 'admin' %}
+                        <td class="text-center">
+                            <input type="checkbox" class="form-check-input report-item-check" value="{{ c.id }}" onchange="handleItemCheck()">
+                        </td>
+                        {% endif %}
                         <td class="text-muted">{{ loop.index }}</td>
                         <td>
                             <i class="bi bi-person-badge text-primary me-1"></i>
@@ -78,20 +99,25 @@
                         <td class="small text-muted">
                             <i class="bi bi-clock me-1"></i> {{ c.created_at }}
                         </td>
-                        <td class="text-end">
-                            {% if c.excel_filename and c.status == 'success' %}
-                            <a href="{{ url_for('download_file', filename=c.excel_filename) }}" class="btn btn-sm btn-outline-success">
-                                <i class="bi bi-download me-1"></i> ดาวน์โหลด .xlsx
-                            </a>
-                            {% else %}
-                            <span class="text-muted small">-</span>
-                            {% endif %}
+                        <td class="text-end text-nowrap">
+                            <div class="d-inline-flex align-items-center gap-1">
+                                {% if c.excel_filename and c.status == 'success' %}
+                                <a href="{{ url_for('download_file', filename=c.excel_filename) }}" class="btn btn-sm btn-outline-success">
+                                    <i class="bi bi-download me-1"></i> ดาวน์โหลด .xlsx
+                                </a>
+                                {% endif %}
+                                {% if current_user and current_user.role == 'admin' %}
+                                <button type="button" class="btn btn-sm btn-outline-danger" onclick="confirmDeleteSingle({{ c.id }}, '{{ c.original_filename|replace('\'', '\\\'') }}')" title="ลบประวัติรายการนี้ (เฉพาะ Admin)">
+                                    <i class="bi bi-trash"></i> ลบ
+                                </button>
+                                {% endif %}
+                            </div>
                         </td>
                     </tr>
                     {% endfor %}
                 {% else %}
                     <tr>
-                        <td colspan="9" class="text-center py-5 text-muted">
+                        <td colspan="10" class="text-center py-5 text-muted">
                             <i class="bi bi-inbox fs-1 d-block mb-2"></i>
                             ยังไม่มีบันทึกประวัติการแปลงไฟล์ในระบบ
                         </td>
@@ -108,13 +134,162 @@
     const reportSearch = document.getElementById('reportSearch');
     const tableBody = document.getElementById('reportsTableBody');
 
-    reportSearch.addEventListener('input', function() {
-        const query = this.value.toLowerCase();
-        const rows = tableBody.querySelectorAll('tr');
-        rows.forEach(row => {
-            const text = row.textContent.toLowerCase();
-            row.style.display = text.includes(query) ? '' : 'none';
+    if (reportSearch) {
+        reportSearch.addEventListener('input', function() {
+            const query = this.value.toLowerCase();
+            const rows = tableBody.querySelectorAll('tr.report-row');
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(query) ? '' : 'none';
+            });
+            handleItemCheck();
         });
-    });
+    }
+
+    function getVisibleCheckboxes() {
+        const rows = Array.from(document.querySelectorAll('tr.report-row'));
+        return rows
+            .filter(r => r.style.display !== 'none')
+            .map(r => r.querySelector('.report-item-check'))
+            .filter(Boolean);
+    }
+
+    function toggleSelectAll(master) {
+        const visibleCbs = getVisibleCheckboxes();
+        visibleCbs.forEach(cb => {
+            cb.checked = master.checked;
+        });
+        handleItemCheck();
+    }
+
+    function selectAllVisible() {
+        const visibleCbs = getVisibleCheckboxes();
+        visibleCbs.forEach(cb => {
+            cb.checked = true;
+        });
+        handleItemCheck();
+    }
+
+    function clearAllSelection() {
+        const allCbs = document.querySelectorAll('.report-item-check');
+        allCbs.forEach(cb => {
+            cb.checked = false;
+        });
+        handleItemCheck();
+    }
+
+    function handleItemCheck() {
+        const allCbs = document.querySelectorAll('.report-item-check');
+        const checked = document.querySelectorAll('.report-item-check:checked');
+        const countBadge = document.getElementById('selectedCountBadge');
+        const clearBtn = document.getElementById('clearSelectBtn');
+        const master = document.getElementById('checkAllReports');
+
+        allCbs.forEach(cb => {
+            const tr = cb.closest('tr');
+            if (tr) {
+                tr.classList.toggle('table-danger', cb.checked);
+            }
+        });
+
+        if (countBadge) countBadge.textContent = checked.length;
+        if (clearBtn) {
+            if (checked.length > 0) {
+                clearBtn.classList.remove('d-none');
+            } else {
+                clearBtn.classList.add('d-none');
+            }
+        }
+        if (master) {
+            const visibleCbs = getVisibleCheckboxes();
+            const visibleChecked = visibleCbs.filter(cb => cb.checked);
+            master.checked = visibleCbs.length > 0 && visibleChecked.length === visibleCbs.length;
+        }
+    }
+
+    async function confirmDeleteSingle(logId, fileName) {
+        const result = await Swal.fire({
+            title: 'ยืนยันการลบประวัตินี้?',
+            html: `คุณต้องการลบประวัติไฟล์ <strong>${fileName}</strong> หรือไม่?<br><small class="text-danger">*ข้อมูลสกัด ไฟล์ PDF ต้นฉบับ และไฟล์ Excel ที่เกี่ยวข้องจะถูกลบออกจากระบบถาวร</small>`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#dc3545',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: '<i class="bi bi-trash me-1"></i> ลบรายการนี้',
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (result.isConfirmed) {
+            try {
+                const response = await fetch(`/admin/conversions/delete/${logId}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (data.success) {
+                    await Swal.fire({
+                        icon: 'success',
+                        title: 'ลบสำเร็จ',
+                        text: data.message,
+                        timer: 1200,
+                        showConfirmButton: false
+                    });
+                    location.reload();
+                } else {
+                    Swal.fire({ icon: 'error', title: 'ผิดพลาด', text: data.message });
+                }
+            } catch (err) {
+                Swal.fire({ icon: 'error', text: err.message });
+            }
+        }
+    }
+
+    async function confirmBatchDelete() {
+        const checked = document.querySelectorAll('.report-item-check:checked');
+        const ids = Array.from(checked).map(cb => parseInt(cb.value));
+        if (ids.length === 0) {
+            Swal.fire({
+                icon: 'info',
+                title: 'ยังไม่ได้เลือกรายการ',
+                text: 'กรุณาติ๊กเลือกช่องหน้ารายการที่ต้องการลบ หรือกดปุ่ม "เลือกทั้งหมด" ก่อนครับ'
+            });
+            return;
+        }
+
+        const result = await Swal.fire({
+            title: `ยืนยันการลบ ${ids.length} รายการ?`,
+            html: `คุณต้องการลบประวัติการแปลงไฟล์ที่เลือกทั้งหมด <strong>${ids.length}</strong> รายการ ใช่หรือไม่?<br><small class="text-danger">*ไฟล์ PDF ต้นฉบับและไฟล์ Excel ผลลัพธ์จะถูกลบออกถาวร</small>`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#dc3545',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: `<i class="bi bi-trash me-1"></i> ใช่, ลบ ${ids.length} รายการ!`,
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (result.isConfirmed) {
+            try {
+                const response = await fetch('/admin/conversions/delete-batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ log_ids: ids })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    await Swal.fire({
+                        icon: 'success',
+                        title: 'ลบสำเร็จ',
+                        text: data.message,
+                        timer: 1500,
+                        showConfirmButton: false
+                    });
+                    location.reload();
+                } else {
+                    Swal.fire({ icon: 'error', title: 'ผิดพลาด', text: data.message });
+                }
+            } catch (err) {
+                Swal.fire({ icon: 'error', text: err.message });
+            }
+        }
+    }
 </script>
 {% endblock %}

@@ -149,7 +149,7 @@
                             <li>
                                 <a class="dropdown-item py-2" href="{{ url_for('dashboard', type='uncertified') }}">
                                     <i class="bi bi-file-earmark-text text-primary me-2 fs-5 align-middle"></i>
-                                    <strong>1. แบบไม่รับรอง</strong>
+                                    <strong>1. แบบไม่รับรอง (ท.ร.14/1)</strong>
                                     <div class="text-muted small ms-4">มาตรฐาน ท.ร.14/1 ทั่วไป</div>
                                 </a>
                             </li>
@@ -157,11 +157,24 @@
                             <li>
                                 <a class="dropdown-item py-2" href="{{ url_for('dashboard', type='certified') }}">
                                     <i class="bi bi-award text-success me-2 fs-5 align-middle"></i>
-                                    <strong>2. แบบรับรอง</strong>
+                                    <strong>2. แบบรับรอง (ท.ร.14/1)</strong>
                                     <div class="text-muted small ms-4">มีตราประทับนายทะเบียน & รับรองรายการ</div>
                                 </a>
                             </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li>
+                                <a class="dropdown-item py-2" href="{{ url_for('dashboard', type='land') }}">
+                                    <i class="bi bi-geo-alt-fill text-warning me-2 fs-5 align-middle"></i>
+                                    <strong>3. แปลงไฟล์ข้อมูลที่ดิน (23 คอลัมน์)</strong>
+                                    <div class="text-muted small ms-4">สืบทรัพย์กรมที่ดิน โฉนด / น.ส.3 / ห้องชุด</div>
+                                </a>
+                            </li>
                         </ul>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-light {{ 'active' if request.endpoint == 'pdf_merger' }}" href="{{ url_for('pdf_merger') }}">
+                            <i class="bi bi-files text-info me-1"></i> รวม & จัดเรียงไฟล์ PDF ที่ดิน
+                        </a>
                     </li>
                     {% else %}
                     <li class="nav-item dropdown">
@@ -172,7 +185,7 @@
                             <li>
                                 <a class="dropdown-item py-2" href="{{ url_for('dashboard', type='uncertified') }}">
                                     <i class="bi bi-file-earmark-text text-primary me-2 fs-5 align-middle"></i>
-                                    <strong>1. แบบไม่รับรอง</strong>
+                                    <strong>1. แบบไม่รับรอง (ท.ร.14/1)</strong>
                                     <div class="text-muted small ms-4">มาตรฐาน ท.ร.14/1 ทั่วไป</div>
                                 </a>
                             </li>
@@ -180,11 +193,24 @@
                             <li>
                                 <a class="dropdown-item py-2" href="{{ url_for('dashboard', type='certified') }}">
                                     <i class="bi bi-award text-success me-2 fs-5 align-middle"></i>
-                                    <strong>2. แบบรับรอง</strong>
+                                    <strong>2. แบบรับรอง (ท.ร.14/1)</strong>
                                     <div class="text-muted small ms-4">มีตราประทับนายทะเบียน & รับรองรายการ</div>
                                 </a>
                             </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li>
+                                <a class="dropdown-item py-2" href="{{ url_for('dashboard', type='land') }}">
+                                    <i class="bi bi-geo-alt-fill text-warning me-2 fs-5 align-middle"></i>
+                                    <strong>3. แปลงไฟล์ข้อมูลที่ดิน (23 คอลัมน์)</strong>
+                                    <div class="text-muted small ms-4">สืบทรัพย์กรมที่ดิน โฉนด / น.ส.3 / ห้องชุด</div>
+                                </a>
+                            </li>
                         </ul>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-light {{ 'active' if request.endpoint == 'pdf_merger' }}" href="{{ url_for('pdf_merger') }}">
+                            <i class="bi bi-files text-info me-1"></i> รวม & จัดเรียงไฟล์ PDF ที่ดิน
+                        </a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link text-light {{ 'active' if request.endpoint == 'history' }}" href="{{ url_for('history') }}">

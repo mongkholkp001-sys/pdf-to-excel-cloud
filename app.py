@@ -10,6 +10,7 @@ from werkzeug.utils import secure_filename
 
 import database
 import extractor
+import land_extractor
 import excel_exporter
 import hardware_id
 
@@ -118,7 +119,6 @@ def login():
                 session['device_mac'] = client_mac
 
         # Set session
-        session.permanent = True
         session['user_id'] = user['id']
         session['username'] = user['username']
         session['full_name'] = user['full_name']
@@ -202,9 +202,121 @@ def change_my_password():
 @login_required
 def dashboard():
     doc_type = request.args.get('type', 'uncertified').strip()
-    if doc_type not in ['uncertified', 'certified']:
+    if doc_type not in ['uncertified', 'certified', 'land']:
         doc_type = 'uncertified'
     return render_template('dashboard.html', active_doc_type=doc_type)
+
+MERGED_LAND_CACHE = {}
+
+@app.route('/pdf-merger')
+@login_required
+def pdf_merger():
+    return render_template('pdf_merger.html')
+
+@app.route('/api/merge-land-pdf', methods=['POST'])
+@login_required
+def merge_land_pdf_api():
+    files = request.files.getlist('pdf_files')
+    if not files or all(f.filename == '' for f in files):
+        return jsonify({'success': False, 'error': 'กรุณาเลือกไฟล์ PDF อย่างน้อย 1 ไฟล์'}), 400
+
+    saved_paths = []
+    orig_filenames = []
+    unique_prefix = datetime.now().strftime('%Y%m%d_%H%M%S_') + uuid.uuid4().hex[:6]
+
+    try:
+        for idx, f in enumerate(files):
+            if f and f.filename and f.filename.lower().endswith('.pdf'):
+                orig_filenames.append(f.filename)
+                clean_name = secure_filename(f.filename) or f'file_{idx+1}.pdf'
+                sp = os.path.join(UPLOAD_FOLDER, f"merge_{unique_prefix}_{idx+1}_{clean_name}")
+                f.save(sp)
+                saved_paths.append(sp)
+
+        if not saved_paths:
+            return jsonify({'success': False, 'error': 'ไม่พบไฟล์ PDF ที่ถูกต้อง'}), 400
+
+        sort_strategy = request.form.get('sort_strategy', 'smart_deed').strip()
+        merged_pdf_name = f"Merged_Sorted_Land_{unique_prefix}.pdf"
+        merged_pdf_path = os.path.join(OUTPUT_FOLDER, merged_pdf_name)
+
+        report = land_extractor.merge_and_sort_land_pdfs(saved_paths, merged_pdf_path, sort_strategy=sort_strategy)
+
+        # Also extract 25-column Excel from the sorted/merged PDF so the user can download or send to converter immediately
+        records = land_extractor.extract_land_pdf_to_records([merged_pdf_path])
+        excel_name = f"Export_Land_Merged_{unique_prefix}.xlsx"
+        excel_path = os.path.join(OUTPUT_FOLDER, excel_name)
+        excel_exporter.export_land_records_to_excel(records, excel_path)
+
+        page_count = report.get('total_output_pages', len(records))
+        row_count = len(records)
+        first_orig = orig_filenames[0] if orig_filenames else merged_pdf_name
+        display_orig = first_orig if len(orig_filenames) == 1 else f"{first_orig} (+รวม {len(orig_filenames)} ไฟล์)"
+        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+
+        log_id = database.log_conversion(
+            user_id=session['user_id'],
+            original_filename=f"[ข้อมูลที่ดิน] {display_orig}",
+            stored_filename=os.path.basename(saved_paths[0]),
+            page_count=page_count,
+            row_count=row_count,
+            excel_filename=excel_name,
+            status='success',
+            ip_address=client_ip
+        )
+
+        payload = {
+            'success': True,
+            'doc_type': 'land',
+            'merged_id': unique_prefix,
+            'log_id': log_id,
+            'page_count': page_count,
+            'row_count': row_count,
+            'report': report,
+            'discrepancy_report': report,
+            'records': records,
+            'merged_pdf_url': url_for('download_file', filename=merged_pdf_name),
+            'excel_url': url_for('download_file', filename=excel_name),
+            'download_url': url_for('download_file', filename=excel_name),
+            'convert_page_url': url_for('dashboard', type='land', merged_id=unique_prefix)
+        }
+        MERGED_LAND_CACHE[unique_prefix] = payload
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'เกิดข้อผิดพลาดในการรวมและจัดเรียงไฟล์: {str(e)}'}), 500
+
+@app.route('/api/merged-land-result/<merged_id>')
+@login_required
+def get_merged_land_result(merged_id):
+    if merged_id in MERGED_LAND_CACHE:
+        return jsonify(MERGED_LAND_CACHE[merged_id])
+    # Fallback if server restarted: read from outputs folder
+    safe_id = secure_filename(merged_id)
+    merged_pdf_name = f"Merged_Sorted_Land_{safe_id}.pdf"
+    merged_pdf_path = os.path.join(OUTPUT_FOLDER, merged_pdf_name)
+    excel_name = f"Export_Land_Merged_{safe_id}.xlsx"
+    excel_path = os.path.join(OUTPUT_FOLDER, excel_name)
+    if not os.path.exists(merged_pdf_path):
+        return jsonify({'success': False, 'error': 'ไม่พบข้อมูลไฟล์ที่รวมไว้ กรุณารวมไฟล์ใหม่อีกครั้ง'}), 404
+    report = land_extractor.merge_and_sort_land_pdfs([merged_pdf_path], merged_pdf_path)
+    records = land_extractor.extract_land_pdf_to_records([merged_pdf_path])
+    if not os.path.exists(excel_path):
+        excel_exporter.export_land_records_to_excel(records, excel_path)
+    payload = {
+        'success': True,
+        'doc_type': 'land',
+        'merged_id': safe_id,
+        'page_count': report.get('total_output_pages', len(records)),
+        'row_count': len(records),
+        'report': report,
+        'discrepancy_report': report,
+        'records': records,
+        'merged_pdf_url': url_for('download_file', filename=merged_pdf_name),
+        'excel_url': url_for('download_file', filename=excel_name),
+        'download_url': url_for('download_file', filename=excel_name)
+    }
+    MERGED_LAND_CACHE[safe_id] = payload
+    return jsonify(payload)
 
 @app.route('/history')
 @login_required
@@ -226,29 +338,34 @@ def upload_progress(job_id):
 @app.route('/api/upload', methods=['POST'])
 @login_required
 def upload_pdf():
-    if 'pdf_file' not in request.files:
+    files = request.files.getlist('pdf_file')
+    if not files or all(f.filename == '' for f in files):
         return jsonify({'success': False, 'error': 'ไม่พบไฟล์ PDF'}), 400
         
-    file = request.files['pdf_file']
     doc_type = request.form.get('doc_type', 'uncertified').strip()
     job_id = request.form.get('job_id', '').strip()
     
-    if doc_type not in ['uncertified', 'certified']:
+    if doc_type not in ['uncertified', 'certified', 'land']:
         doc_type = 'uncertified'
 
-    if file.filename == '':
-        return jsonify({'success': False, 'error': 'กรุณาเลือกไฟล์ PDF'}), 400
-        
-    if not file.filename.lower().endswith('.pdf'):
+    valid_files = [f for f in files if f and f.filename and f.filename.lower().endswith('.pdf')]
+    if not valid_files:
         return jsonify({'success': False, 'error': 'ระบบรองรับเฉพาะไฟล์ .pdf เท่านั้น'}), 400
         
-    orig_name = file.filename
-    clean_orig_name = secure_filename(orig_name) or 'document.pdf'
-    type_label = "Certified" if doc_type == 'certified' else "Standard"
+    orig_name = valid_files[0].filename if len(valid_files) == 1 else f"{valid_files[0].filename} (+รวม {len(valid_files)} ไฟล์)"
+    type_label = "Land" if doc_type == 'land' else ("Certified" if doc_type == 'certified' else "Standard")
     unique_prefix = datetime.now().strftime('%Y%m%d_%H%M%S_') + uuid.uuid4().hex[:6]
-    stored_pdf_name = f"{unique_prefix}_{clean_orig_name}"
-    pdf_path = os.path.join(UPLOAD_FOLDER, stored_pdf_name)
-    file.save(pdf_path)
+
+    saved_pdf_paths = []
+    for idx, f in enumerate(valid_files):
+        clean_orig = secure_filename(f.filename) or f'document_{idx+1}.pdf'
+        s_name = f"{unique_prefix}_{idx+1}_{clean_orig}" if len(valid_files) > 1 else f"{unique_prefix}_{clean_orig}"
+        p_path = os.path.join(UPLOAD_FOLDER, s_name)
+        f.save(p_path)
+        saved_pdf_paths.append(p_path)
+
+    stored_pdf_name = os.path.basename(saved_pdf_paths[0])
+    pdf_path = saved_pdf_paths[0]
     
     if job_id:
         CONVERSION_PROGRESS[job_id] = {
@@ -268,27 +385,59 @@ def upload_pdf():
             }
             
     try:
-        # Extract data from PDF (multi-page supported)
-        gemini_key = database.get_setting('gemini_api_key') or os.environ.get('GEMINI_API_KEY')
-        records = extractor.extract_pdf_data(pdf_path, progress_callback=on_progress, doc_type=doc_type, api_key=gemini_key)
-        page_count = len(records)
-        row_count = page_count
-        
-        if job_id:
-            CONVERSION_PROGRESS[job_id] = {
-                'progress': 90,
-                'message': f'สกัดข้อมูลสำเร็จ {page_count} หน้า กำลังสร้างไฟล์ Excel (.xlsx)...',
-                'done': False
-            }
-            
-        # Generate Excel
         excel_name = f"Export_{type_label}_{unique_prefix}.xlsx"
         excel_path = os.path.join(OUTPUT_FOLDER, excel_name)
-        excel_exporter.export_records_to_excel(records, excel_path)
+        discrepancy_report = None
+        merged_pdf_url = None
+
+        if doc_type == 'land':
+            # Also run merge & sort check to detect any missing/mismatched deeds
+            merged_pdf_name = f"Merged_Sorted_Land_{unique_prefix}.pdf"
+            merged_pdf_path = os.path.join(OUTPUT_FOLDER, merged_pdf_name)
+            discrepancy_report = land_extractor.merge_and_sort_land_pdfs(saved_pdf_paths, merged_pdf_path)
+            merged_pdf_url = url_for('download_file', filename=merged_pdf_name)
+
+            records = land_extractor.extract_land_pdf_to_records(saved_pdf_paths, progress_callback=on_progress)
+            page_count = discrepancy_report.get('total_input_pages', len(records))
+            row_count = len(records)
+
+            if job_id:
+                CONVERSION_PROGRESS[job_id] = {
+                    'progress': 90,
+                    'message': f'สกัดข้อมูลที่ดินสำเร็จ {row_count} แปลง กำลังสร้างไฟล์ Excel 23 คอลัมน์ (.xlsx)...',
+                    'done': False
+                }
+            excel_exporter.export_land_records_to_excel(records, excel_path)
+        else:
+            # Extract data from PDF (multi-page supported)
+            gemini_key = database.get_setting('gemini_api_key') or os.environ.get('GEMINI_API_KEY')
+            records = []
+            for p_path in saved_pdf_paths:
+                recs = extractor.extract_pdf_data(p_path, progress_callback=on_progress, doc_type=doc_type, api_key=gemini_key)
+                for r in recs:
+                    r['no'] = len(records) + 1
+                    records.append(r)
+            page_count = len(records)
+            row_count = page_count
+            
+            if job_id:
+                CONVERSION_PROGRESS[job_id] = {
+                    'progress': 90,
+                    'message': f'สกัดข้อมูลสำเร็จ {page_count} หน้า กำลังสร้างไฟล์ Excel (.xlsx)...',
+                    'done': False
+                }
+                
+            excel_exporter.export_records_to_excel(records, excel_path)
         
         # Log to Database
         client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-        type_prefix_thai = "แบบรับรอง" if doc_type == 'certified' else "แบบไม่รับรอง"
+        if doc_type == 'land':
+            type_prefix_thai = "ข้อมูลที่ดิน"
+        elif doc_type == 'certified':
+            type_prefix_thai = "แบบรับรอง"
+        else:
+            type_prefix_thai = "แบบไม่รับรอง"
+
         log_id = database.log_conversion(
             user_id=session['user_id'],
             original_filename=f"[{type_prefix_thai}] {orig_name}",
@@ -301,12 +450,13 @@ def upload_pdf():
         )
         
         # Save extracted records for fast view
-        database.save_extracted_records(log_id, records)
+        if doc_type != 'land':
+            database.save_extracted_records(log_id, records)
         
         if job_id:
             CONVERSION_PROGRESS[job_id] = {
                 'progress': 100,
-                'message': f'แปลงไฟล์สำเร็จ {page_count} หน้า เรียบร้อย 100%!',
+                'message': f'แปลงไฟล์สำเร็จ {row_count} รายการ เรียบร้อย 100%!',
                 'done': True
             }
             
@@ -316,6 +466,8 @@ def upload_pdf():
             'page_count': page_count,
             'row_count': row_count,
             'records': records,
+            'discrepancy_report': discrepancy_report,
+            'merged_pdf_url': merged_pdf_url,
             'log_id': log_id,
             'download_url': url_for('download_file', filename=excel_name)
         })
@@ -349,22 +501,6 @@ def download_file(filename):
     if not os.path.exists(file_path):
         abort(404)
     return send_from_directory(OUTPUT_FOLDER, safe_name, as_attachment=True)
-
-@app.route('/download-server-package')
-def download_server_package():
-    desktop_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\comk25'), 'Desktop')
-    zip_path = os.path.join(desktop_dir, 'PDF_to_Excel_Server_System.zip')
-    if not os.path.exists(zip_path):
-        abort(404)
-    return send_from_directory(desktop_dir, 'PDF_to_Excel_Server_System.zip', as_attachment=True)
-
-@app.route('/download-tha-traineddata')
-def download_tha_traineddata():
-    for d in [os.path.join(BASE_DIR, 'tessdata'), BASE_DIR]:
-        p = os.path.join(d, 'tha.traineddata')
-        if os.path.exists(p):
-            return send_from_directory(d, 'tha.traineddata', as_attachment=True)
-    abort(404)
 
 # Admin Portal
 @app.route('/admin')
@@ -550,8 +686,6 @@ def api_test_gemini():
         return jsonify({'success': False, 'message': 'กรุณาระบุ Gemini API Key ก่อนทำการทดสอบ'}), 400
     try:
         import gemini_engine
-        import importlib
-        importlib.reload(gemini_engine)
         ok, msg = gemini_engine.test_gemini_connection(key)
         return jsonify({'success': ok, 'message': msg})
     except Exception as e:

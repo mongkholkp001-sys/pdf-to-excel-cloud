@@ -21,35 +21,52 @@
         display: none;
     }
     .table-responsive {
-        max-height: 500px;
+        max-height: 550px;
         overflow-y: auto;
+    }
+    .pre-line-cell {
+        white-space: pre-line;
+        min-width: 220px;
     }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="row justify-content-center">
-    <div class="col-lg-10">
+    <div class="col-lg-11">
         <!-- Header -->
-        <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
             <div>
-                <h3 class="fw-bold mb-1">แปลงไฟล์ PDF ทะเบียนราษฎร เป็น Excel</h3>
-                <p class="text-muted mb-0">ระบบรองรับไฟล์ PDF หลายหน้า โดยประมวลผล <strong>1 หน้า = ข้อมูล 1 แถวใน Excel</strong> อัตโนมัติ</p>
+                <h3 class="fw-bold mb-1" id="pageHeaderTitle">
+                    {% if active_doc_type == 'land' %}
+                    แปลงไฟล์ PDF ข้อมูลที่ดิน / สืบทรัพย์กรมที่ดิน เป็น Excel (23 คอลัมน์)
+                    {% else %}
+                    แปลงไฟล์ PDF ทะเบียนราษฎร & ข้อมูลที่ดิน เป็น Excel
+                    {% endif %}
+                </h3>
+                <p class="text-muted mb-0" id="pageHeaderSub">
+                    ระบบรองรับการสกัดข้อมูล ท.ร.14/1 และรายงานตรวจสอบหลักทรัพย์กรมที่ดิน (โฉนด / น.ส.3 / ห้องชุด) พร้อมตรวจสอบความครบถ้วนของเลขโฉนดอัตโนมัติ
+                </p>
             </div>
-            <a href="{{ url_for('history') }}" class="btn btn-outline-secondary">
-                <i class="bi bi-clock-history me-1"></i> ประวัติการแปลงไฟล์
-            </a>
+            <div class="d-flex gap-2">
+                <a href="{{ url_for('pdf_merger') }}" class="btn btn-warning fw-medium shadow-sm">
+                    <i class="bi bi-files me-1"></i> เมนูรวม & จัดเรียงไฟล์ PDF ที่ดิน
+                </a>
+                <a href="{{ url_for('history') }}" class="btn btn-outline-secondary">
+                    <i class="bi bi-clock-history me-1"></i> ประวัติการแปลงไฟล์
+                </a>
+            </div>
         </div>
 
-                {% if gemini_active %}
+        {% if gemini_active %}
         <div class="alert alert-success d-flex align-items-center justify-content-between py-2 px-3 mb-3 shadow-sm border-0 rounded-4" style="background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);">
             <div class="d-flex align-items-center">
                 <div class="p-2 rounded-circle bg-success text-white me-3 shadow-sm">
                     <i class="bi bi-stars fs-5"></i>
                 </div>
                 <div>
-                    <span class="fw-bold text-success fs-6">Enterprise AI Engine (Google Gemini 1.5 Flash) ทำงานอยู่</span>
-                    <p class="mb-0 text-muted small">ระบบใช้ Multimodal Vision AI อ่านทะลุตราประทับ ลายเซ็น และรอยหมึก แม่นยำ 100%</p>
+                    <span class="fw-bold text-success fs-6">Enterprise AI Engine & High-Precision Coordinate Parser ทำงานอยู่</span>
+                    <p class="mb-0 text-muted small">ระบบสกัดพิกัดข้อมูลและตรวจสอบความสัมพันธ์ของเลขโฉนดแม่นยำ 100%</p>
                 </div>
             </div>
             <span class="badge bg-success px-3 py-2 rounded-pill shadow-sm">
@@ -58,25 +75,34 @@
         </div>
         {% endif %}
 
-        <!-- Mode Switcher Buttons -->
+        <!-- Mode Switcher Buttons (3 Modes) -->
         <div class="card mb-4 shadow-sm border-0">
             <div class="card-body p-2 bg-light rounded-3">
                 <div class="row g-2">
-                    <div class="col-md-6">
-                        <button type="button" class="btn w-100 py-3 text-start d-flex align-items-center mode-btn {{ 'btn-primary text-white shadow-sm' if active_doc_type != 'certified' else 'btn-outline-secondary bg-white' }}" id="modeUncertifiedBtn" onclick="switchMode('uncertified')">
-                            <i class="bi bi-file-earmark-text fs-2 me-3 {{ 'text-white' if active_doc_type != 'certified' else 'text-primary' }}" id="iconUncert"></i>
+                    <div class="col-md-4">
+                        <button type="button" class="btn w-100 py-3 text-start d-flex align-items-center mode-btn {{ 'btn-primary text-white shadow-sm' if active_doc_type == 'uncertified' else 'btn-outline-secondary bg-white' }}" id="modeUncertifiedBtn" onclick="switchMode('uncertified')">
+                            <i class="bi bi-file-earmark-text fs-2 me-3 {{ 'text-white' if active_doc_type == 'uncertified' else 'text-primary' }}" id="iconUncert"></i>
                             <div>
-                                <div class="fw-bold fs-6">1. แปลงไฟล์แบบไม่รับรอง</div>
-                                <small class="{{ 'text-white-50' if active_doc_type != 'certified' else 'text-muted' }}" id="subUncert">มาตรฐาน ท.ร. 14/1 ทั่วไป (ดิจิทัล & สแกน)</small>
+                                <div class="fw-bold fs-6">1. แบบไม่รับรอง (ท.ร.14/1)</div>
+                                <small class="{{ 'text-white-50' if active_doc_type == 'uncertified' else 'text-muted' }}" id="subUncert">มาตรฐาน ท.ร. 14/1 ทั่วไป</small>
                             </div>
                         </button>
                     </div>
-                    <div class="col-md-6">
+                    <div class="col-md-4">
                         <button type="button" class="btn w-100 py-3 text-start d-flex align-items-center mode-btn {{ 'btn-success text-white shadow-sm' if active_doc_type == 'certified' else 'btn-outline-secondary bg-white' }}" id="modeCertifiedBtn" onclick="switchMode('certified')">
                             <i class="bi bi-award fs-2 me-3 {{ 'text-white' if active_doc_type == 'certified' else 'text-success' }}" id="iconCert"></i>
                             <div>
-                                <div class="fw-bold fs-6">2. แปลงไฟล์แบบรับรอง</div>
-                                <small class="{{ 'text-white-50' if active_doc_type == 'certified' else 'text-muted' }}" id="subCert">มีตราประทับนายทะเบียน & รับรองรายการ</small>
+                                <div class="fw-bold fs-6">2. แบบรับรอง (ท.ร.14/1)</div>
+                                <small class="{{ 'text-white-50' if active_doc_type == 'certified' else 'text-muted' }}" id="subCert">มีตราประทับนายทะเบียน & ลายเซ็น</small>
+                            </div>
+                        </button>
+                    </div>
+                    <div class="col-md-4">
+                        <button type="button" class="btn w-100 py-3 text-start d-flex align-items-center mode-btn {{ 'btn-warning text-dark shadow-sm' if active_doc_type == 'land' else 'btn-outline-secondary bg-white' }}" id="modeLandBtn" onclick="switchMode('land')">
+                            <i class="bi bi-geo-alt-fill fs-2 me-3 {{ 'text-dark' if active_doc_type == 'land' else 'text-warning' }}" id="iconLand"></i>
+                            <div>
+                                <div class="fw-bold fs-6">3. แปลงไฟล์ที่ดิน (23 คอลัมน์)</div>
+                                <small class="{{ 'text-dark' if active_doc_type == 'land' else 'text-muted' }}" id="subLand">โฉนด / น.ส.3 / ห้องชุด + เช็คเลขโฉนด</small>
                             </div>
                         </button>
                     </div>
@@ -85,11 +111,27 @@
         </div>
 
         <!-- Mode Indicator Banner -->
-        <div class="alert {{ 'alert-primary' if active_doc_type != 'certified' else 'alert-success' }} d-flex align-items-center mb-4 shadow-sm" id="modeBanner">
-            <i class="bi {{ 'bi-info-circle-fill text-primary' if active_doc_type != 'certified' else 'bi-check-circle-fill text-success' }} fs-4 me-3" id="modeBannerIcon"></i>
+        <div class="alert {{ 'alert-warning' if active_doc_type == 'land' else ('alert-success' if active_doc_type == 'certified' else 'alert-primary') }} d-flex align-items-center mb-4 shadow-sm" id="modeBanner">
+            <i class="bi {{ 'bi-geo-alt-fill text-warning' if active_doc_type == 'land' else ('bi-check-circle-fill text-success' if active_doc_type == 'certified' else 'bi-info-circle-fill text-primary') }} fs-4 me-3" id="modeBannerIcon"></i>
             <div>
-                <strong id="modeBannerTitle">{{ 'โหมดปัจจุบัน: แปลงไฟล์แบบไม่รับรอง (มาตรฐาน ท.ร.14/1)' if active_doc_type != 'certified' else 'โหมดปัจจุบัน: แปลงไฟล์แบบรับรอง (มีตราประทับและรับรองรายการ)' }}</strong>
-                <div class="small" id="modeBannerDesc">{{ 'เหมาะสำหรับเอกสารทะเบียนราษฎร ท.ร.14/1 ทั่วไปที่ไม่มีตราประทับรับรองด้านล่าง' if active_doc_type != 'certified' else 'เหมาะสำหรับเอกสารแบบรับรองรายการที่มีตราประทับสีน้ำเงิน ลายเซ็นนายทะเบียน และข้อความรับรองจากฐานข้อมูล' }}</div>
+                <strong id="modeBannerTitle">
+                    {% if active_doc_type == 'land' %}
+                    โหมดปัจจุบัน: แปลงไฟล์ข้อมูลที่ดิน / สืบทรัพย์กรมที่ดิน (มาตรฐาน 23 คอลัมน์)
+                    {% elif active_doc_type == 'certified' %}
+                    โหมดปัจจุบัน: แปลงไฟล์แบบรับรอง (มีตราประทับและรับรองรายการ)
+                    {% else %}
+                    โหมดปัจจุบัน: แปลงไฟล์แบบไม่รับรอง (มาตรฐาน ท.ร.14/1)
+                    {% endif %}
+                </strong>
+                <div class="small" id="modeBannerDesc">
+                    {% if active_doc_type == 'land' %}
+                    รองรับการเลือกหลายไฟล์พร้อมกัน! ระบบสกัดข้อมูลโฉนดที่ดิน, น.ส.3 ก., ห้องชุด, ภาระผูกพัน, เบอร์โทรผู้ถือกรรมสิทธิ์ (เช่น 0897590825) และตรวจสอบความสัมพันธ์ของเลขโฉนดหน้าแรกกับหน้ารายละเอียดให้อัตโนมัติ
+                    {% elif active_doc_type == 'certified' %}
+                    เหมาะสำหรับเอกสารแบบรับรองรายการที่มีตราประทับสีน้ำเงิน ลายเซ็นนายทะเบียน และข้อความรับรองจากฐานข้อมูล
+                    {% else %}
+                    เหมาะสำหรับเอกสารทะเบียนราษฎร ท.ร.14/1 ทั่วไปที่ไม่มีตราประทับรับรองด้านล่าง
+                    {% endif %}
+                </div>
             </div>
         </div>
 
@@ -98,21 +140,27 @@
             <form id="uploadForm" enctype="multipart/form-data">
                 <input type="hidden" name="doc_type" id="docTypeInput" value="{{ active_doc_type }}">
                 <div class="drop-zone" id="dropZone">
-                    <input type="file" id="pdfFileInput" name="pdf_file" accept=".pdf" class="d-none">
+                    <input type="file" id="pdfFileInput" name="pdf_file" accept=".pdf" multiple class="d-none">
                     <div class="mb-3">
-                        <i class="bi bi-cloud-arrow-up text-primary" style="font-size: 3.5rem;" id="dropIcon"></i>
+                        <i class="bi {{ 'bi-geo-alt-fill text-warning' if active_doc_type == 'land' else ('bi-award text-success' if active_doc_type == 'certified' else 'bi-cloud-arrow-up text-primary') }}" style="font-size: 3.5rem;" id="dropIcon"></i>
                     </div>
-                    <h5 class="fw-bold mb-2">ลากไฟล์ PDF มาวางที่นี่ หรือคลิกเพื่อเลือกไฟล์</h5>
-                    <p class="text-muted small mb-3" id="dropDesc">รองรับไฟล์เอกสาร PDF ท.ร.14/1 (มีกี่หน้าก็ได้ ระบบอ่าน 1 หน้า = 1 แถว)</p>
-                    <button type="button" class="btn btn-primary px-4" id="selectFileBtn" onclick="document.getElementById('pdfFileInput').click();">
-                        <i class="bi bi-folder2-open me-1"></i> เลือกไฟล์จากเครื่อง
+                    <h5 class="fw-bold mb-2">ลากไฟล์ PDF มาวางที่นี่ หรือคลิกเพื่อเลือกไฟล์ (เลือกได้หลายไฟล์พร้อมกัน)</h5>
+                    <p class="text-muted small mb-3" id="dropDesc">
+                        {% if active_doc_type == 'land' %}
+                        รองรับไฟล์ PDF รายงานการตรวจสอบหลักทรัพย์และรายละเอียดโฉนดที่ดิน (เลือกได้หลายไฟล์พร้อมกัน ระบบจะจับคู่ตามเลขโฉนดให้อัตโนมัติ)
+                        {% else %}
+                        รองรับไฟล์เอกสาร PDF ท.ร.14/1 (มีกี่หน้าก็ได้ ระบบอ่าน 1 หน้า = 1 แถว)
+                        {% endif %}
+                    </p>
+                    <button type="button" class="btn {{ 'btn-warning text-dark fw-bold' if active_doc_type == 'land' else ('btn-success' if active_doc_type == 'certified' else 'btn-primary') }} px-4" id="selectFileBtn" onclick="document.getElementById('pdfFileInput').click();">
+                        <i class="bi bi-folder2-open me-1"></i> เลือกไฟล์ PDF จากเครื่อง
                     </button>
                     <div id="selectedFileName" class="mt-3 fw-bold text-success d-none"></div>
                 </div>
 
                 <div class="mt-3 text-end d-none" id="startConvertDiv">
                     <button type="submit" class="btn btn-success btn-lg px-5 shadow-sm" id="convertBtn">
-                        <i class="bi bi-gear-fill me-1"></i> เริ่มต้นแปลงไฟล์
+                        <i class="bi bi-gear-fill me-1"></i> เริ่มต้นแปลงไฟล์เป็น Excel
                     </button>
                 </div>
             </form>
@@ -146,23 +194,34 @@
                     </div>
 
                     <div class="d-flex justify-content-between text-muted small mt-2">
-                        <span><i class="bi bi-cpu text-primary me-1"></i> ระบบ AI OCR & สกัดพิกัดข้อมูลอัตโนมัติ</span>
-                        <span id="progressPageHint" class="fw-medium text-secondary">ประมวลผล 1 หน้า = 1 แถวใน Excel</span>
+                        <span><i class="bi bi-cpu text-primary me-1"></i> ระบบสกัดพิกัดข้อมูลอัตโนมัติ</span>
+                        <span id="progressPageHint" class="fw-medium text-secondary">ประมวลผลและจัดรูปแบบตาราง Excel</span>
                     </div>
                 </div>
             </div>
         </div>
 
+        <!-- Discrepancy / Validation Report Card (For Land Mode) -->
+        <div class="card p-4 mb-4 shadow-sm border-0 d-none" id="discrepancyCard">
+            <h5 class="fw-bold mb-3" id="discrepancyTitle">
+                <i class="bi bi-clipboard2-check me-2"></i> รายงานการตรวจสอบความสัมพันธ์ของหน้าแรกและรายละเอียดแต่ละแปลง (ตามเลขโฉนด)
+            </h5>
+            <div id="discrepancyBody"></div>
+        </div>
+
         <!-- Preview Results Card -->
         <div class="card p-4 shadow-sm preview-card" id="resultCard">
-            <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+            <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
                 <div>
                     <h5 class="fw-bold mb-1 text-success">
                         <i class="bi bi-check-circle-fill me-2"></i> แปลงไฟล์สำเร็จ!
                     </h5>
-                    <span class="text-muted small" id="summaryText">พบข้อมูลทั้งหมด 0 หน้า (0 แถว)</span>
+                    <span class="text-muted small" id="summaryText">พบข้อมูลทั้งหมด 0 รายการ</span>
                 </div>
-                <div>
+                <div class="d-flex flex-wrap gap-2">
+                    <a href="#" id="downloadMergedPdfBtn" class="btn btn-outline-primary btn-lg shadow-sm d-none">
+                        <i class="bi bi-file-earmark-pdf-fill text-danger me-1"></i> ดาวน์โหลด PDF ที่รวมและจัดเรียงแล้ว
+                    </a>
                     <a href="#" id="downloadExcelBtn" class="btn btn-success btn-lg shadow-sm">
                         <i class="bi bi-file-earmark-excel me-1"></i> ดาวน์โหลดไฟล์ Excel (.xlsx)
                     </a>
@@ -173,26 +232,15 @@
             <div class="mb-3">
                 <div class="input-group">
                     <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
-                    <input type="text" id="tableSearch" class="form-control" placeholder="ค้นหาข้อมูลในตาราง (เช่น ชื่อ, เลขบัตร, จังหวัด)...">
+                    <input type="text" id="tableSearch" class="form-control" placeholder="ค้นหาข้อมูลในตาราง (เช่น ชื่อ, เลขบัตร, เลขโฉนด, จังหวัด, เบอร์โทร)...">
                 </div>
             </div>
 
             <!-- Preview Table -->
             <div class="table-responsive border rounded">
-                <table class="table table-hover table-striped align-middle mb-0 font-sarabun" id="previewTable">
-                    <thead class="table-dark">
-                        <tr>
-                            <th class="text-center">ลำดับ</th>
-                            <th>เลขประจำตัวประชาชน</th>
-                            <th>รหัสประจำบ้าน</th>
-                            <th>ชื่อ - นามสกุล</th>
-                            <th class="text-center">เพศ</th>
-                            <th>เกิดวันที่</th>
-                            <th class="text-center">อายุ</th>
-                            <th class="text-center">สถานภาพ</th>
-                            <th>ที่อยู่ตามทะเบียนบ้าน</th>
-                            <th>สำนักทะเบียน</th>
-                        </tr>
+                <table class="table table-hover table-striped align-middle mb-0 font-sarabun small" id="previewTable">
+                    <thead class="table-dark" id="previewTableHead">
+                        <!-- Dynamically populated based on doc_type -->
                     </thead>
                     <tbody id="previewTableBody">
                         <!-- Filled by JS -->
@@ -213,10 +261,16 @@
     const uploadForm = document.getElementById('uploadForm');
     const loadingDiv = document.getElementById('loadingDiv');
     const resultCard = document.getElementById('resultCard');
+    const discrepancyCard = document.getElementById('discrepancyCard');
+    const discrepancyBody = document.getElementById('discrepancyBody');
     const downloadExcelBtn = document.getElementById('downloadExcelBtn');
+    const downloadMergedPdfBtn = document.getElementById('downloadMergedPdfBtn');
     const summaryText = document.getElementById('summaryText');
+    const previewTableHead = document.getElementById('previewTableHead');
     const previewTableBody = document.getElementById('previewTableBody');
     const tableSearch = document.getElementById('tableSearch');
+
+    let selectedFilesList = [];
 
     function switchMode(mode) {
         const input = document.getElementById('docTypeInput');
@@ -224,10 +278,15 @@
         
         const btnUncert = document.getElementById('modeUncertifiedBtn');
         const btnCert = document.getElementById('modeCertifiedBtn');
+        const btnLand = document.getElementById('modeLandBtn');
+
         const iconUncert = document.getElementById('iconUncert');
         const iconCert = document.getElementById('iconCert');
+        const iconLand = document.getElementById('iconLand');
+
         const subUncert = document.getElementById('subUncert');
         const subCert = document.getElementById('subCert');
+        const subLand = document.getElementById('subLand');
         
         const banner = document.getElementById('modeBanner');
         const bannerIcon = document.getElementById('modeBannerIcon');
@@ -236,13 +295,36 @@
         const dropIcon = document.getElementById('dropIcon');
         const dropDesc = document.getElementById('dropDesc');
         const selectFileBtn = document.getElementById('selectFileBtn');
+
+        // Reset all buttons
+        btnUncert.className = 'btn w-100 py-3 text-start d-flex align-items-center mode-btn btn-outline-secondary bg-white';
+        btnCert.className = 'btn w-100 py-3 text-start d-flex align-items-center mode-btn btn-outline-secondary bg-white';
+        btnLand.className = 'btn w-100 py-3 text-start d-flex align-items-center mode-btn btn-outline-secondary bg-white';
+
+        iconUncert.className = 'bi bi-file-earmark-text fs-2 me-3 text-primary';
+        iconCert.className = 'bi bi-award fs-2 me-3 text-success';
+        iconLand.className = 'bi bi-geo-alt-fill fs-2 me-3 text-warning';
+
+        subUncert.className = 'text-muted';
+        subCert.className = 'text-muted';
+        subLand.className = 'text-muted';
         
-        if (mode === 'certified') {
-            btnUncert.className = 'btn w-100 py-3 text-start d-flex align-items-center mode-btn btn-outline-secondary bg-white';
+        if (mode === 'land') {
+            btnLand.className = 'btn w-100 py-3 text-start d-flex align-items-center mode-btn btn-warning text-dark shadow-sm';
+            iconLand.className = 'bi bi-geo-alt-fill fs-2 me-3 text-dark';
+            subLand.className = 'text-dark';
+            
+            banner.className = 'alert alert-warning d-flex align-items-center mb-4 shadow-sm';
+            bannerIcon.className = 'bi bi-geo-alt-fill text-warning fs-4 me-3';
+            bannerTitle.textContent = 'โหมดปัจจุบัน: แปลงไฟล์ข้อมูลที่ดิน / สืบทรัพย์กรมที่ดิน (มาตรฐาน 23 คอลัมน์)';
+            bannerDesc.textContent = 'รองรับการเลือกหลายไฟล์พร้อมกัน! ระบบสกัดข้อมูลโฉนดที่ดิน, น.ส.3 ก., ห้องชุด, ภาระผูกพัน, เบอร์โทรผู้ถือกรรมสิทธิ์ (เช่น 0897590825) และตรวจสอบความสัมพันธ์ของเลขโฉนดหน้าแรกกับหน้ารายละเอียดให้อัตโนมัติ';
+            
+            dropIcon.className = 'bi bi-geo-alt-fill text-warning';
+            dropDesc.textContent = 'รองรับไฟล์ PDF รายงานการตรวจสอบหลักทรัพย์และรายละเอียดโฉนดที่ดิน (เลือกได้หลายไฟล์พร้อมกัน ระบบจะจับคู่ตามเลขโฉนดให้อัตโนมัติ)';
+            selectFileBtn.className = 'btn btn-warning text-dark fw-bold px-4';
+        } else if (mode === 'certified') {
             btnCert.className = 'btn w-100 py-3 text-start d-flex align-items-center mode-btn btn-success text-white shadow-sm';
-            iconUncert.className = 'bi bi-file-earmark-text fs-2 me-3 text-primary';
             iconCert.className = 'bi bi-award fs-2 me-3 text-white';
-            subUncert.className = 'text-muted';
             subCert.className = 'text-white-50';
             
             banner.className = 'alert alert-success d-flex align-items-center mb-4 shadow-sm';
@@ -255,11 +337,8 @@
             selectFileBtn.className = 'btn btn-success px-4';
         } else {
             btnUncert.className = 'btn w-100 py-3 text-start d-flex align-items-center mode-btn btn-primary text-white shadow-sm';
-            btnCert.className = 'btn w-100 py-3 text-start d-flex align-items-center mode-btn btn-outline-secondary bg-white';
             iconUncert.className = 'bi bi-file-earmark-text fs-2 me-3 text-white';
-            iconCert.className = 'bi bi-award fs-2 me-3 text-success';
             subUncert.className = 'text-white-50';
-            subCert.className = 'text-muted';
             
             banner.className = 'alert alert-primary d-flex align-items-center mb-4 shadow-sm';
             bannerIcon.className = 'bi bi-info-circle-fill text-primary fs-4 me-3';
@@ -295,18 +374,26 @@
         const dt = e.dataTransfer;
         const files = dt.files;
         if (files.length > 0) {
-            handleFileSelect(files[0]);
+            handleFilesSelect(files);
         }
     });
 
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-            handleFileSelect(e.target.files[0]);
+            handleFilesSelect(e.target.files);
         }
     });
 
-    function handleFileSelect(file) {
-        if (!file.name.toLowerCase().endsWith('.pdf')) {
+    function handleFilesSelect(fileList) {
+        const valid = [];
+        let totalBytes = 0;
+        for (let i = 0; i < fileList.length; i++) {
+            if (fileList[i].name.toLowerCase().endsWith('.pdf')) {
+                valid.push(fileList[i]);
+                totalBytes += fileList[i].size;
+            }
+        }
+        if (valid.length === 0) {
             Swal.fire({
                 icon: 'error',
                 title: 'ไฟล์ไม่ถูกต้อง',
@@ -314,16 +401,86 @@
             });
             return;
         }
-        selectedFileName.textContent = `ไฟล์ที่เลือก: ${file.name} (${(file.size / (1024*1024)).toFixed(2)} MB)`;
+        selectedFilesList = valid;
+        if (valid.length === 1) {
+            selectedFileName.textContent = `ไฟล์ที่เลือก: ${valid[0].name} (${(totalBytes / (1024*1024)).toFixed(2)} MB)`;
+        } else {
+            selectedFileName.textContent = `เลือกแล้ว ${valid.length} ไฟล์ (${(totalBytes / (1024*1024)).toFixed(2)} MB): ${valid.map(f => f.name).join(', ')}`;
+        }
         selectedFileName.classList.remove('d-none');
         startConvertDiv.classList.remove('d-none');
+    }
+
+    function renderDiscrepancyReport(rep) {
+        if (!rep) {
+            discrepancyCard.classList.add('d-none');
+            return;
+        }
+        discrepancyCard.classList.remove('d-none');
+        const missing = rep.missing_details || [];
+        const orphans = rep.orphan_details || [];
+
+        let html = '';
+        if (missing.length === 0 && orphans.length === 0) {
+            html += `
+                <div class="alert alert-success mb-0 d-flex align-items-center">
+                    <i class="bi bi-check-circle-fill fs-4 me-3"></i>
+                    <div>
+                        <strong>ข้อมูลครบถ้วนสมบูรณ์ 100%!</strong>
+                        <div class="small">ตรวจสอบผู้ถือกรรมสิทธิ์ ${rep.total_persons} ราย (รวม ${rep.matched_count} แปลง) พบว่าเลขโฉนดในตารางสรุปหน้าแรกและหน้ารายละเอียดตรงกันครบทุกแปลง</div>
+                    </div>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="alert alert-danger mb-3 d-flex align-items-center">
+                    <i class="bi bi-exclamation-triangle-fill fs-3 me-3"></i>
+                    <div>
+                        <strong>แจ้งเตือน: พบข้อมูลหน้าแรกกับหน้ารายละเอียดไม่สัมพันธ์กัน!</strong>
+                        <div class="small">กรุณาตรวจสอบรายการที่ขาดหายด้านล่างนี้ (อ้างอิงตามเลขที่โฉนด/หลักทรัพย์)</div>
+                    </div>
+                </div>
+            `;
+
+            if (missing.length > 0) {
+                html += `<h6 class="fw-bold text-danger mb-2"><i class="bi bi-x-circle me-1"></i> 1. มีรายการในหน้าแรก แต่ขาดหน้ารายละเอียดโฉนด (${missing.length} แปลง):</h6>`;
+                html += `<div class="table-responsive mb-3"><table class="table table-sm table-bordered border-danger mb-0"><thead class="table-danger"><tr><th>ชื่อเจ้าของ</th><th>เลขบัตรประชาชน</th><th>ประเภทหลักประกัน</th><th>เลขที่โฉนดที่ขาด</th><th>สำนักงานที่ดิน</th><th>สาเหตุ</th></tr></thead><tbody>`;
+                missing.forEach(m => {
+                    html += `<tr>
+                        <td class="fw-bold">${m.owner_name}</td>
+                        <td><code>${m.cid}</code></td>
+                        <td>${m.asset_type}</td>
+                        <td class="fw-bold text-danger">${m.deed_no}</td>
+                        <td>${m.land_office}</td>
+                        <td class="small text-danger">${m.reason} (จากไฟล์ ${m.source_file} หน้า ${m.source_page})</td>
+                    </tr>`;
+                });
+                html += `</tbody></table></div>`;
+            }
+
+            if (orphans.length > 0) {
+                html += `<h6 class="fw-bold text-warning-emphasis mb-2"><i class="bi bi-exclamation-circle me-1"></i> 2. มีหน้ารายละเอียดโฉนด แต่ไม่พบหน้าสรุปหน้าแรก (${orphans.length} แปลง):</h6>`;
+                html += `<div class="table-responsive"><table class="table table-sm table-bordered border-warning mb-0"><thead class="table-warning"><tr><th>ชื่อผู้ถือกรรมสิทธิ์</th><th>เลขบัตรประชาชน</th><th>ประเภทหลักประกัน</th><th>เลขที่โฉนด</th><th>พบในไฟล์</th><th>สาเหตุ</th></tr></thead><tbody>`;
+                orphans.forEach(o => {
+                    html += `<tr>
+                        <td class="fw-bold">${o.owner_name}</td>
+                        <td><code>${o.cid}</code></td>
+                        <td>${o.asset_type}</td>
+                        <td class="fw-bold">${o.deed_no}</td>
+                        <td>${o.source_file} (หน้า ${o.source_page})</td>
+                        <td class="small">${o.reason}</td>
+                    </tr>`;
+                });
+                html += `</tbody></table></div>`;
+            }
+        }
+        discrepancyBody.innerHTML = html;
     }
 
     // Submit form via AJAX with real-time progress polling
     uploadForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const file = fileInput.files[0];
-        if (!file) {
+        if (!selectedFilesList || selectedFilesList.length === 0) {
             Swal.fire({ icon: 'warning', text: 'กรุณาเลือกไฟล์ PDF ก่อน' });
             return;
         }
@@ -331,7 +488,7 @@
         const currentMode = document.getElementById('docTypeInput').value || 'uncertified';
         const jobId = 'job_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
         const formData = new FormData();
-        formData.append('pdf_file', file);
+        selectedFilesList.forEach(f => formData.append('pdf_file', f));
         formData.append('doc_type', currentMode);
         formData.append('job_id', jobId);
 
@@ -345,13 +502,14 @@
         progressBar.style.width = '8%';
         progressBadge.textContent = '8%';
         progressStageTitle.textContent = 'กำลังอัปโหลดไฟล์ PDF...';
-        progressStatusDetail.textContent = `ส่งไฟล์ ${file.name} เข้าสู่เซิร์ฟเวอร์...`;
+        progressStatusDetail.textContent = `กำลังส่งไฟล์เข้าสู่เซิร์ฟเวอร์...`;
 
         // Switch to loading UI
         dropZone.classList.add('d-none');
         startConvertDiv.classList.add('d-none');
         loadingDiv.classList.remove('d-none');
         resultCard.style.display = 'none';
+        discrepancyCard.classList.add('d-none');
 
         // Poll progress endpoint every 400ms
         let pollTimer = setInterval(async () => {
@@ -401,48 +559,13 @@
             progressBar.style.width = '100%';
             progressBadge.textContent = '100%';
             progressStageTitle.textContent = 'แปลงไฟล์เสร็จสมบูรณ์ 100%!';
-            progressStatusDetail.textContent = `ประมวลผลเสร็จสิ้น ${data.page_count} หน้า พร้อมดาวน์โหลด`;
+            progressStatusDetail.textContent = `ประมวลผลเสร็จสิ้น ${data.row_count} รายการ พร้อมดาวน์โหลด`;
 
-            // Wait 400ms for user to see 100% finish
             setTimeout(() => {
                 loadingDiv.classList.add('d-none');
                 dropZone.classList.remove('d-none');
                 startConvertDiv.classList.remove('d-none');
-
-                // Success View
-                const modeLabel = data.doc_type === 'certified' ? 'แบบรับรอง' : 'แบบไม่รับรอง';
-                summaryText.textContent = `ประมวลผลสำเร็จ ${data.page_count} หน้า = สร้างข้อมูล ${data.row_count} แถวใน Excel [${modeLabel}]`;
-                downloadExcelBtn.href = data.download_url;
-
-                // Render table
-                previewTableBody.innerHTML = '';
-                data.records.forEach((r, idx) => {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td class="text-center fw-bold">${r.no || (idx + 1)}</td>
-                        <td><code>${r.cid || '-'}</code></td>
-                        <td><code>${r.hid || '-'}</code></td>
-                        <td class="fw-medium">${r.full_name || '-'}</td>
-                        <td class="text-center"><span class="badge ${r.gender === 'หญิง' ? 'bg-danger-subtle text-danger' : 'bg-primary-subtle text-primary'}">${r.gender || '-'}</span></td>
-                        <td>${r.dob || '-'}</td>
-                        <td class="text-center">${r.age || '-'}</td>
-                        <td class="text-center"><span class="badge bg-secondary-subtle text-secondary">${r.status || '-'}</span></td>
-                        <td class="small">${r.address || '-'}</td>
-                        <td class="small text-muted">${r.reg_office || '-'}</td>
-                    `;
-                    previewTableBody.appendChild(tr);
-                });
-
-                resultCard.style.display = 'block';
-                resultCard.scrollIntoView({ behavior: 'smooth' });
-
-                Swal.fire({
-                    icon: 'success',
-                    title: 'แปลงไฟล์สำเร็จ!',
-                    text: `ประมวลผลสำเร็จทั้งหมด ${data.page_count} หน้า พร้อมให้ดาวน์โหลดไฟล์ Excel ได้ทันที`,
-                    timer: 2500,
-                    showConfirmButton: false
-                });
+                renderConversionResult(data, true);
             }, 400);
 
         } catch (err) {
@@ -455,6 +578,154 @@
                 title: 'เกิดข้อผิดพลาดในการเชื่อมต่อ',
                 text: err.message
             });
+        }
+    });
+
+    function renderConversionResult(data, showToast = true) {
+        downloadExcelBtn.href = data.download_url;
+
+        if (data.merged_pdf_url && data.doc_type === 'land') {
+            downloadMergedPdfBtn.href = data.merged_pdf_url;
+            downloadMergedPdfBtn.classList.remove('d-none');
+        } else {
+            downloadMergedPdfBtn.classList.add('d-none');
+        }
+
+        if (data.doc_type === 'land') {
+            renderDiscrepancyReport(data.discrepancy_report);
+            summaryText.textContent = `สกัดข้อมูลที่ดินสำเร็จ ${data.row_count} แปลง (จากทั้งหมด ${data.page_count} หน้า) [ตารางมาตรฐาน 25 คอลัมน์]`;
+
+            previewTableHead.innerHTML = `
+                <tr>
+                    <th class="text-center">ลำดับ</th>
+                    <th>พิมพ์เมื่อ</th>
+                    <th>เลขบัตรประชาชน</th>
+                    <th>รายชื่อ</th>
+                    <th class="text-center">ผลการสืบทรัพย์</th>
+                    <th>ประเภทหลักประกัน</th>
+                    <th class="text-center">เลขที่โฉนด</th>
+                    <th class="text-center">หน้าสำรวจ</th>
+                    <th class="text-center">เลขที่ดิน</th>
+                    <th>ตำบล/แขวง</th>
+                    <th>อำเภอ/เขต</th>
+                    <th>จังหวัด</th>
+                    <th>อาคารโรงเรือน (ประเภทและเลขที่)</th>
+                    <th class="text-center">เนื้อที่</th>
+                    <th>ชื่อผู้ถือกรรมสิทธิ์</th>
+                    <th class="text-center">อายุ</th>
+                    <th class="text-center">ประเภทการได้มา</th>
+                    <th class="text-end">ทุนทรัพย์จดทะเบียน (บาท)</th>
+                    <th class="text-end">ราคาประเมินที่ดิน (บาท)</th>
+                    <th class="text-end">ราคาประเมินสิ่งปลูกสร้าง (บาท)</th>
+                    <th>ผู้รับจำนอง/ภาระผูกพัน</th>
+                    <th>วงเงินจำนอง (บาท)</th>
+                    <th>สถานะการอายัด</th>
+                    <th>สำนักงานที่ดิน</th>
+                    <th class="text-center">เบอร์โทรศัพท์</th>
+                </tr>
+            `;
+
+            previewTableBody.innerHTML = '';
+            (data.records || []).forEach((r, idx) => {
+                const tr = document.createElement('tr');
+                const fmtNum = (n) => (typeof n === 'number' ? n.toLocaleString() : (n || 0));
+                tr.innerHTML = `
+                    <td class="text-center fw-bold">${r.no || (idx + 1)}</td>
+                    <td class="text-nowrap">${r.print_date || '-'}</td>
+                    <td><code>${r.cid || '-'}</code></td>
+                    <td class="fw-medium text-nowrap">${r.full_name || '-'}</td>
+                    <td class="text-center"><span class="badge ${r.search_result === 'พบทรัพย์' ? 'bg-success' : 'bg-secondary'}">${r.search_result || '-'}</span></td>
+                    <td class="text-nowrap">${r.asset_type || '-'}</td>
+                    <td class="text-center fw-bold text-primary">${r.deed_no || '-'}</td>
+                    <td class="text-center">${r.survey_page || '-'}</td>
+                    <td class="text-center">${r.land_no || '-'}</td>
+                    <td>${r.tambon || '-'}</td>
+                    <td>${r.amphoe || '-'}</td>
+                    <td>${r.province || '-'}</td>
+                    <td class="pre-line-cell fw-medium text-dark">${r.building_info || '-'}</td>
+                    <td class="text-center text-nowrap">${r.area_text || '-'}</td>
+                    <td class="pre-line-cell">${r.owner_formatted || '-'}</td>
+                    <td class="text-center">${r.age || '-'}</td>
+                    <td class="text-center">${r.acquisition_type || '-'}</td>
+                    <td class="text-end">${fmtNum(r.reg_capital)}</td>
+                    <td class="text-end">${fmtNum(r.land_value)}</td>
+                    <td class="text-end">${fmtNum(r.building_value)}</td>
+                    <td class="pre-line-cell small">${r.mortgage_info || '-'}</td>
+                    <td class="pre-line-cell small">${r.mortgage_amount || '-'}</td>
+                    <td class="small">${r.seizure_status || 'ไม่มี'}</td>
+                    <td class="small">${r.land_office || '-'}</td>
+                    <td class="text-center fw-bold text-success">${r.phone || '-'}</td>
+                `;
+                previewTableBody.appendChild(tr);
+            });
+        } else {
+            discrepancyCard.classList.add('d-none');
+            const modeLabel = data.doc_type === 'certified' ? 'แบบรับรอง' : 'แบบไม่รับรอง';
+            summaryText.textContent = `ประมวลผลสำเร็จ ${data.page_count} หน้า = สร้างข้อมูล ${data.row_count} แถวใน Excel [${modeLabel}]`;
+
+            previewTableHead.innerHTML = `
+                <tr>
+                    <th class="text-center">ลำดับ</th>
+                    <th>เลขประจำตัวประชาชน</th>
+                    <th>รหัสประจำบ้าน</th>
+                    <th>ชื่อ - นามสกุล</th>
+                    <th class="text-center">เพศ</th>
+                    <th>เกิดวันที่</th>
+                    <th class="text-center">อายุ</th>
+                    <th class="text-center">สถานภาพ</th>
+                    <th>ที่อยู่ตามทะเบียนบ้าน</th>
+                    <th>สำนักทะเบียน</th>
+                </tr>
+            `;
+
+            previewTableBody.innerHTML = '';
+            (data.records || []).forEach((r, idx) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="text-center fw-bold">${r.no || (idx + 1)}</td>
+                    <td><code>${r.cid || '-'}</code></td>
+                    <td><code>${r.hid || '-'}</code></td>
+                    <td class="fw-medium">${r.full_name || '-'}</td>
+                    <td class="text-center"><span class="badge ${r.gender === 'หญิง' ? 'bg-danger-subtle text-danger' : 'bg-primary-subtle text-primary'}">${r.gender || '-'}</span></td>
+                    <td>${r.dob || '-'}</td>
+                    <td class="text-center">${r.age || '-'}</td>
+                    <td class="text-center"><span class="badge bg-secondary-subtle text-secondary">${r.status || '-'}</span></td>
+                    <td class="small">${r.address || '-'}</td>
+                    <td class="small text-muted">${r.reg_office || '-'}</td>
+                `;
+                previewTableBody.appendChild(tr);
+            });
+        }
+
+        resultCard.style.display = 'block';
+        resultCard.scrollIntoView({ behavior: 'smooth' });
+
+        if (showToast) {
+            Swal.fire({
+                icon: 'success',
+                title: 'แปลงไฟล์สำเร็จ!',
+                text: `สร้างข้อมูลทั้งหมด ${data.row_count} แถว พร้อมให้ดาวน์โหลดไฟล์ Excel ได้ทันที`,
+                timer: 2500,
+                showConfirmButton: false
+            });
+        }
+    }
+
+    // Auto-load merged PDF result if redirected from /pdf-merger (?merged_id=...)
+    document.addEventListener('DOMContentLoaded', async () => {
+        const params = new URLSearchParams(window.location.search);
+        const mergedId = params.get('merged_id');
+        if (mergedId) {
+            switchMode('land');
+            try {
+                const res = await fetch(`/api/merged-land-result/${encodeURIComponent(mergedId)}`);
+                const data = await res.json();
+                if (data && data.success) {
+                    renderConversionResult(data, true);
+                }
+            } catch (err) {
+                console.error(err);
+            }
         }
     });
 

@@ -27,8 +27,6 @@ def ensure_tessdata():
     for fname in ['tha.traineddata', 'eng.traineddata']:
         src = None
         for candidate in [
-    '/usr/bin/tesseract',
-    '/usr/local/bin/tesseract',
             os.path.join(BASE_DIR, 'tessdata', fname),
             os.path.join(BASE_DIR, 'tesseract', 'tessdata', fname),
             os.path.join(BASE_DIR, 'tesseract', fname),
@@ -76,8 +74,6 @@ ensure_tessdata()
 # Tesseract executable search order (prioritize portable inside folder or root)
 TESS_EXE = None
 for candidate in [
-    '/usr/bin/tesseract',
-    '/usr/local/bin/tesseract',
     os.path.join(BASE_DIR, 'tesseract', 'tesseract.exe'),
     os.path.join(BASE_DIR, 'tesseract.exe'),
     r'C:\Program Files\Tesseract-OCR\tesseract.exe',

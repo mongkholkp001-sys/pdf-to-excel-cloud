@@ -561,7 +561,7 @@ def get_system_stats(month=None):
     }
 
 def delete_conversion_log(log_id):
-    """ลบประวัติการแปลงไฟล์ 1 รายการ พร้อมไฟล์จริง"""
+    """ลบประวัติการแปลงไฟล์ 1 รายการ พร้อมไฟล์จริงทั้งหมดที่เกี่ยวข้อง"""
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute('SELECT stored_filename, excel_filename FROM conversion_logs WHERE id = ?', (log_id,))
@@ -570,25 +570,41 @@ def delete_conversion_log(log_id):
         conn.close()
         return False, "ไม่พบข้อมูลประวัติการแปลงไฟล์นี้"
         
-    stored_pdf = row['stored_filename']
-    excel_file = row['excel_filename']
+    stored_pdf = row['stored_filename'] or ''
+    excel_file = row['excel_filename'] or ''
     
     cursor.execute('DELETE FROM extracted_records WHERE conversion_id = ?', (log_id,))
     cursor.execute('DELETE FROM conversion_logs WHERE id = ?', (log_id,))
     conn.commit()
     conn.close()
     
-    # ลบไฟล์ออกจากโฟลเดอร์ uploads และ outputs
+    # ลบไฟล์ออกจากโฟลเดอร์ uploads และ outputs (รวมถึงไฟล์ชุดเดียวกัน เช่น Merged_Sorted_Land_*)
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
+        uploads_dir = os.path.join(base_dir, 'uploads')
+        outputs_dir = os.path.join(base_dir, 'outputs')
         if stored_pdf:
-            p_pdf = os.path.join(base_dir, 'uploads', stored_pdf)
+            p_pdf = os.path.join(uploads_dir, stored_pdf)
             if os.path.exists(p_pdf):
                 os.remove(p_pdf)
         if excel_file:
-            p_xls = os.path.join(base_dir, 'outputs', excel_file)
+            p_xls = os.path.join(outputs_dir, excel_file)
             if os.path.exists(p_xls):
                 os.remove(p_xls)
+
+        prefix_match = re.search(r'(\d{8}_\d{6}_[0-9a-fA-F]{6})', stored_pdf or excel_file)
+        if prefix_match:
+            prefix = prefix_match.group(1)
+            for folder in (uploads_dir, outputs_dir):
+                if os.path.isdir(folder):
+                    for fname in os.listdir(folder):
+                        if prefix in fname:
+                            fpath = os.path.join(folder, fname)
+                            if os.path.isfile(fpath):
+                                try:
+                                    os.remove(fpath)
+                                except Exception:
+                                    pass
     except Exception:
         pass
         

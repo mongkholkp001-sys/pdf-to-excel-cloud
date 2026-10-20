@@ -3,14 +3,24 @@
 {% block title %}ประวัติการแปลงไฟล์ของฉัน{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
     <div>
         <h3 class="fw-bold mb-1">ประวัติการแปลงไฟล์ของฉัน</h3>
         <p class="text-muted mb-0">รายการไฟล์ PDF ที่คุณเคยอัปโหลดและแปลงเป็น Excel ในระบบ</p>
     </div>
-    <a href="{{ url_for('dashboard') }}" class="btn btn-primary">
-        <i class="bi bi-plus-lg me-1"></i> แปลงไฟล์ใหม่
-    </a>
+    <div class="d-flex align-items-center gap-2">
+        {% if current_user and current_user.role == 'admin' and conversions %}
+        <button type="button" class="btn btn-outline-secondary" onclick="selectAllHistory()">
+            <i class="bi bi-check2-square me-1"></i> เลือกทั้งหมด
+        </button>
+        <button type="button" id="batchDeleteHistoryBtn" class="btn btn-danger shadow-sm fw-semibold" onclick="confirmBatchDeleteHistory()">
+            <i class="bi bi-trash-fill me-1"></i> ลบรายการที่เลือก (<span id="selectedHistoryCount">0</span>)
+        </button>
+        {% endif %}
+        <a href="{{ url_for('dashboard') }}" class="btn btn-primary">
+            <i class="bi bi-plus-lg me-1"></i> แปลงไฟล์ใหม่
+        </a>
+    </div>
 </div>
 
 <div class="card p-3 shadow-sm">
@@ -18,18 +28,28 @@
         <table class="table table-hover align-middle mb-0">
             <thead class="table-light">
                 <tr>
+                    {% if current_user and current_user.role == 'admin' %}
+                    <th style="width: 42px;" class="text-center">
+                        <input type="checkbox" id="checkAllHistory" class="form-check-input" onchange="toggleSelectAllHistory(this)" title="เลือกทั้งหมด">
+                    </th>
+                    {% endif %}
                     <th style="width: 5%;">#</th>
                     <th>ชื่อไฟล์ PDF ต้นฉบับ</th>
                     <th class="text-center" style="width: 15%;">จำนวนหน้าที่แปลง</th>
                     <th class="text-center" style="width: 15%;">สถานะ</th>
                     <th style="width: 20%;">วันและเวลาที่แปลง</th>
-                    <th class="text-end" style="width: 15%;">ดาวน์โหลด Excel</th>
+                    <th class="text-end" style="width: 18%;">ดาวน์โหลด Excel{% if current_user and current_user.role == 'admin' %} / ลบ{% endif %}</th>
                 </tr>
             </thead>
             <tbody>
                 {% if conversions %}
                     {% for c in conversions %}
-                    <tr>
+                    <tr id="hist-row-{{ c.id }}">
+                        {% if current_user and current_user.role == 'admin' %}
+                        <td class="text-center">
+                            <input type="checkbox" class="form-check-input hist-item-check" value="{{ c.id }}" onchange="handleHistoryCheck()">
+                        </td>
+                        {% endif %}
                         <td class="text-muted">{{ loop.index }}</td>
                         <td class="fw-medium">
                             <i class="bi bi-file-earmark-pdf text-danger me-2"></i>
@@ -48,20 +68,25 @@
                         <td class="text-muted small">
                             <i class="bi bi-clock me-1"></i> {{ c.created_at }}
                         </td>
-                        <td class="text-end">
-                            {% if c.excel_filename and c.status == 'success' %}
-                            <a href="{{ url_for('download_file', filename=c.excel_filename) }}" class="btn btn-sm btn-outline-success">
-                                <i class="bi bi-download me-1"></i> โหลด .xlsx
-                            </a>
-                            {% else %}
-                            <span class="text-muted small">-</span>
-                            {% endif %}
+                        <td class="text-end text-nowrap">
+                            <div class="d-inline-flex align-items-center gap-1">
+                                {% if c.excel_filename and c.status == 'success' %}
+                                <a href="{{ url_for('download_file', filename=c.excel_filename) }}" class="btn btn-sm btn-outline-success">
+                                    <i class="bi bi-download me-1"></i> โหลด .xlsx
+                                </a>
+                                {% endif %}
+                                {% if current_user and current_user.role == 'admin' %}
+                                <button type="button" class="btn btn-sm btn-outline-danger" onclick="confirmDeleteHistorySingle({{ c.id }}, '{{ c.original_filename|replace('\'', '\\\'') }}')" title="ลบประวัติรายการนี้ (เฉพาะ Admin)">
+                                    <i class="bi bi-trash"></i> ลบ
+                                </button>
+                                {% endif %}
+                            </div>
                         </td>
                     </tr>
                     {% endfor %}
                 {% else %}
                     <tr>
-                        <td colspan="6" class="text-center py-5 text-muted">
+                        <td colspan="7" class="text-center py-5 text-muted">
                             <i class="bi bi-inbox fs-1 d-block mb-2"></i>
                             ยังไม่มีประวัติการแปลงไฟล์ เริ่มแปลงไฟล์แรกของคุณได้เลย
                         </td>
@@ -71,4 +96,76 @@
         </table>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+{% if current_user and current_user.role == 'admin' %}
+<script>
+    function toggleSelectAllHistory(master) {
+        document.querySelectorAll('.hist-item-check').forEach(cb => cb.checked = master.checked);
+        handleHistoryCheck();
+    }
+    function selectAllHistory() {
+        document.querySelectorAll('.hist-item-check').forEach(cb => cb.checked = true);
+        handleHistoryCheck();
+    }
+    function handleHistoryCheck() {
+        const allCbs = document.querySelectorAll('.hist-item-check');
+        const checked = document.querySelectorAll('.hist-item-check:checked');
+        const countEl = document.getElementById('selectedHistoryCount');
+        const master = document.getElementById('checkAllHistory');
+        allCbs.forEach(cb => {
+            const tr = cb.closest('tr');
+            if (tr) tr.classList.toggle('table-danger', cb.checked);
+        });
+        if (countEl) countEl.textContent = checked.length;
+        if (master) master.checked = allCbs.length > 0 && checked.length === allCbs.length;
+    }
+    async function confirmDeleteHistorySingle(logId, fileName) {
+        const result = await Swal.fire({
+            title: 'ยืนยันการลบประวัตินี้?',
+            html: `คุณต้องการลบประวัติไฟล์ <strong>${fileName}</strong> หรือไม่?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#dc3545',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: '<i class="bi bi-trash me-1"></i> ลบรายการนี้',
+            cancelButtonText: 'ยกเลิก'
+        });
+        if (result.isConfirmed) {
+            const res = await fetch(`/admin/conversions/delete/${logId}`, { method: 'POST' });
+            const data = await res.json();
+            if (data.success) location.reload();
+            else Swal.fire({ icon: 'error', text: data.message });
+        }
+    }
+    async function confirmBatchDeleteHistory() {
+        const ids = Array.from(document.querySelectorAll('.hist-item-check:checked')).map(cb => parseInt(cb.value));
+        if (ids.length === 0) {
+            Swal.fire({ icon: 'info', text: 'กรุณาติ๊กเลือกรายการที่ต้องการลบก่อนครับ' });
+            return;
+        }
+        const result = await Swal.fire({
+            title: `ยืนยันการลบ ${ids.length} รายการ?`,
+            html: `คุณต้องการลบประวัติที่เลือกทั้งหมด <strong>${ids.length}</strong> รายการ ใช่หรือไม่?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#dc3545',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: `ใช่, ลบ ${ids.length} รายการ!`,
+            cancelButtonText: 'ยกเลิก'
+        });
+        if (result.isConfirmed) {
+            const res = await fetch('/admin/conversions/delete-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ log_ids: ids })
+            });
+            const data = await res.json();
+            if (data.success) location.reload();
+            else Swal.fire({ icon: 'error', text: data.message });
+        }
+    }
+</script>
+{% endif %}
 {% endblock %}

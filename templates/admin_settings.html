@@ -19,7 +19,7 @@
                 <div class="card-header bg-dark text-white p-4 rounded-top-4 d-flex align-items-center justify-content-between">
                     <div>
                         <h4 class="mb-1 fw-bold"><i class="bi bi-stars text-warning me-2"></i>ตั้งค่า Enterprise AI Engine</h4>
-                        <p class="mb-0 text-white-50 small">เชื่อมต่อ Google Gemini Multimodal Vision (ตรวจจับโมเดลล่าสุดอัตโนมัติ) เพื่อความแม่นยำระดับ 100%</p>
+                        <p class="mb-0 text-white-50 small">เชื่อมต่อ Google Gemini 1.5 Flash เพื่อความแม่นยำระดับ 100%</p>
                     </div>
                     {% if current_key %}
                     <span class="badge bg-success px-3 py-2 fs-6 rounded-pill">
@@ -140,7 +140,7 @@ function testConnection() {
 
     Swal.fire({
         title: 'กำลังทดสอบเชื่อมต่อ...',
-        text: 'กำลังตรวจสอบความถูกต้องและค้นหาโมเดล Gemini ล่าสุดที่รองรับ...',
+        text: 'กำลังส่งคำขอทดสอบไปยัง Google Gemini 1.5 Flash API',
         allowOutsideClick: false,
         didOpen: () => {
             Swal.showLoading();

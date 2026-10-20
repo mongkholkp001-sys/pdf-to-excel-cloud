@@ -127,3 +127,122 @@ def export_records_to_excel(records, output_path):
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     wb.save(output_path)
     return output_path
+
+
+def export_land_records_to_excel(records, output_path):
+    """
+    Exports Land Department asset investigation records in the exact 25-column format requested.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Sheet1'
+
+    headers = [
+        'ลำดับ',
+        'พิมพ์เมื่อ',
+        'เลขบัตรประชาชน',
+        'รายชื่อ',
+        'ผลการสืบทรัพย์',
+        'ประเภทหลักประกัน',
+        'เลขที่โฉนด',
+        'หน้าสำรวจ',
+        'เลขที่ดิน',
+        'ตำบล/แขวง',
+        'อำเภอ/เขต',
+        'จังหวัด',
+        'อาคารโรงเรือน (ประเภทและเลขที่)',
+        'เนื้อที่',
+        'ชื่อผู้ถือกรรมสิทธิ์',
+        'อายุ',
+        'ประเภทการได้มา',
+        'ทุนทรัพย์จดทะเบียน (บาท)',
+        'ราคาประเมินที่ดิน (บาท)',
+        'ราคาประเมินสิ่งปลูกสร้าง (บาท)',
+        'ผู้รับจำนอง/ภาระผูกพัน',
+        'วงเงินจำนอง (บาท)',
+        'สถานะการอายัด',
+        'สำนักงานที่ดิน',
+        'เบอร์โทรศัพท์'
+    ]
+    ws.append(headers)
+
+    header_fill = PatternFill(start_color='1F4E79', end_color='1F4E79', fill_type='solid')
+    header_font = Font(name='Segoe UI', size=11, bold=True, color='FFFFFF')
+    data_font = Font(name='Segoe UI', size=10)
+    thin_side = Side(border_style='thin', color='D9D9D9')
+    data_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+    center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    left_align = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    right_align = Alignment(horizontal='right', vertical='center', wrap_text=True)
+
+    for r in records:
+        ws.append([
+            r.get('no', 1),
+            r.get('print_date', '-'),
+            str(r.get('cid', '-')),
+            r.get('full_name', '-'),
+            r.get('search_result', 'พบทรัพย์'),
+            r.get('asset_type', '-'),
+            str(r.get('deed_no', '-')),
+            str(r.get('survey_page', '-')),
+            str(r.get('land_no', '-')),
+            r.get('tambon', '-'),
+            r.get('amphoe', '-'),
+            r.get('province', '-'),
+            r.get('building_info', '-'),
+            r.get('area_text', '-'),
+            r.get('owner_formatted', '-'),
+            str(r.get('age', '-')),
+            r.get('acquisition_type', '-'),
+            r.get('reg_capital', 0),
+            r.get('land_value', 0),
+            r.get('building_value', 0),
+            r.get('mortgage_info', '-'),
+            r.get('mortgage_amount', '-'),
+            r.get('seizure_status', 'ไม่มี'),
+            r.get('land_office', '-'),
+            str(r.get('phone', '-'))
+        ])
+
+    ws.row_dimensions[1].height = 28
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = center_align
+
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+        # Calculate line count for multiline cells
+        max_lines = 1
+        for c in row:
+            if c.value and '\n' in str(c.value):
+                max_lines = max(max_lines, str(c.value).count('\n') + 1)
+        ws.row_dimensions[row[0].row].height = max(22, max_lines * 18)
+
+        for cell in row:
+            cell.font = data_font
+            cell.border = data_border
+            col_idx = cell.column
+            if col_idx in [1, 2, 3, 5, 7, 8, 9, 14, 16, 17, 25]:
+                cell.alignment = center_align
+                if col_idx in [3, 25]:
+                    cell.number_format = '@'
+            elif col_idx in [18, 19, 20]:
+                cell.alignment = right_align
+                if isinstance(cell.value, (int, float)):
+                    cell.number_format = '#,##0'
+            else:
+                cell.alignment = left_align
+
+    for col in ws.columns:
+        col_idx = col[0].column
+        col_letter = get_column_letter(col_idx)
+        max_line_len = 10
+        for cell in col:
+            val_str = str(cell.value or '')
+            for line in val_str.splitlines():
+                max_line_len = max(max_line_len, len(line))
+        ws.column_dimensions[col_letter].width = min(max(max_line_len * 1.4, 13), 55)
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    wb.save(output_path)
+    return output_path
