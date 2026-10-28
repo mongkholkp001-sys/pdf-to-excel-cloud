@@ -13,11 +13,15 @@ USE_POSTGRES = DATABASE_URL.startswith(('postgres://', 'postgresql://'))
 
 if USE_POSTGRES:
     import psycopg2
+    from psycopg2 import pool as pg_pool
     from psycopg2.extras import DictCursor
     from psycopg2 import IntegrityError as PostgresIntegrityError
 else:
     psycopg2 = None
+    pg_pool = None
     PostgresIntegrityError = ()
+
+_PG_CONN_POOL = None
 
 INTEGRITY_ERRORS = (sqlite3.IntegrityError,) + ((PostgresIntegrityError,) if USE_POSTGRES else ())
 
@@ -51,11 +55,27 @@ class _PgCursorCompat:
     def __iter__(self): return iter(self._cursor)
 
 class _PgConnCompat:
-    def __init__(self, conn): self._conn = conn
+    def __init__(self, conn, pool=None):
+        self._conn = conn
+        self._pool = pool
+        self._closed = False
     def cursor(self): return _PgCursorCompat(self._conn.cursor(cursor_factory=DictCursor))
     def commit(self): return self._conn.commit()
     def rollback(self): return self._conn.rollback()
-    def close(self): return self._conn.close()
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        if self._pool is not None:
+            try:
+                self._pool.putconn(self._conn)
+                return
+            except Exception:
+                pass
+        try:
+            self._conn.close()
+        except Exception:
+            pass
 
 PLANS = {
     'rental_1m': {'name': 'เช่า 1 เดือน (3,000 บาท)', 'price': 3000, 'days': 30},
@@ -66,9 +86,31 @@ PLANS = {
 }
 
 def get_db():
+    global _PG_CONN_POOL
     if USE_POSTGRES:
         url = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
-        return _PgConnCompat(psycopg2.connect(url, connect_timeout=10))
+        try:
+            if _PG_CONN_POOL is None:
+                _PG_CONN_POOL = pg_pool.ThreadedConnectionPool(1, 10, dsn=url, connect_timeout=10)
+            conn = _PG_CONN_POOL.getconn()
+            if conn.closed:
+                _PG_CONN_POOL.putconn(conn, close=True)
+                conn = psycopg2.connect(url, connect_timeout=10)
+                return _PgConnCompat(conn, None)
+            # Fast ping to ensure connection wasn't dropped by server idle timeout
+            try:
+                with conn.cursor() as c:
+                    c.execute("SELECT 1")
+            except Exception:
+                try:
+                    _PG_CONN_POOL.putconn(conn, close=True)
+                except Exception:
+                    pass
+                conn = psycopg2.connect(url, connect_timeout=10)
+                return _PgConnCompat(conn, None)
+            return _PgConnCompat(conn, _PG_CONN_POOL)
+        except Exception:
+            return _PgConnCompat(psycopg2.connect(url, connect_timeout=10), None)
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.execute('PRAGMA journal_mode=WAL;')
     conn.execute('PRAGMA busy_timeout=10000;')

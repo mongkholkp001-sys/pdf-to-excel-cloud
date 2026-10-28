@@ -301,10 +301,12 @@ def merge_land_pdf_api():
         merged_pdf_name = f"Merged_Sorted_Land_{unique_prefix}.pdf"
         merged_pdf_path = os.path.join(OUTPUT_FOLDER, merged_pdf_name)
 
-        report = land_extractor.merge_and_sort_land_pdfs(saved_paths, merged_pdf_path, sort_strategy=sort_strategy)
+        report, pages_meta = land_extractor.merge_and_sort_land_pdfs(
+            saved_paths, merged_pdf_path, sort_strategy=sort_strategy, return_pages_meta=True
+        )
 
-        # Also extract 25-column Excel from the sorted/merged PDF so the user can download or send to converter immediately
-        records = land_extractor.extract_land_pdf_to_records([merged_pdf_path])
+        # Also extract 25-column Excel from the pre-parsed pages (single pass, no double PDF parsing!)
+        records = land_extractor.extract_land_pdf_to_records(saved_paths, _preparsed_pages=pages_meta)
         excel_name = f"Export_Land_Merged_{unique_prefix}.xlsx"
         excel_path = os.path.join(OUTPUT_FOLDER, excel_name)
         excel_exporter.export_land_records_to_excel(records, excel_path)
@@ -444,10 +446,12 @@ def upload_pdf():
             'done': False
         }
         
+    gemini_key = (database.get_setting('gemini_api_key') or os.environ.get('GEMINI_API_KEY')) if doc_type != 'land' else None
+    ai_lbl = " [Enterprise AI ⚡]" if gemini_key else ""
+
     def on_progress(current_page, total_pages):
         if job_id:
             pct = 15 + int((current_page / max(total_pages, 1)) * 70)
-            ai_lbl = " [Enterprise AI ⚡]" if (database.get_setting('gemini_api_key') or os.environ.get('GEMINI_API_KEY')) else ""
             CONVERSION_PROGRESS[job_id] = {
                 'progress': pct,
                 'message': f'กำลังอ่านและสกัดข้อมูลหน้าที่ {current_page}/{total_pages}{ai_lbl} ({pct}%)...',
@@ -461,26 +465,27 @@ def upload_pdf():
         merged_pdf_url = None
 
         if doc_type == 'land':
-            # Also run merge & sort check to detect any missing/mismatched deeds
+            # Single-pass merge, sort, and 25-column extraction with real-time progress
             merged_pdf_name = f"Merged_Sorted_Land_{unique_prefix}.pdf"
             merged_pdf_path = os.path.join(OUTPUT_FOLDER, merged_pdf_name)
-            discrepancy_report = land_extractor.merge_and_sort_land_pdfs(saved_pdf_paths, merged_pdf_path)
+            discrepancy_report, pages_meta = land_extractor.merge_and_sort_land_pdfs(
+                saved_pdf_paths, merged_pdf_path, progress_callback=on_progress, return_pages_meta=True
+            )
             merged_pdf_url = url_for('download_file', filename=merged_pdf_name)
 
-            records = land_extractor.extract_land_pdf_to_records(saved_pdf_paths, progress_callback=on_progress)
+            records = land_extractor.extract_land_pdf_to_records(saved_pdf_paths, _preparsed_pages=pages_meta)
             page_count = discrepancy_report.get('total_input_pages', len(records))
             row_count = len(records)
 
             if job_id:
                 CONVERSION_PROGRESS[job_id] = {
                     'progress': 90,
-                    'message': f'สกัดข้อมูลที่ดินสำเร็จ {row_count} แปลง กำลังสร้างไฟล์ Excel 23 คอลัมน์ (.xlsx)...',
+                    'message': f'สกัดข้อมูลที่ดินสำเร็จ {row_count} แปลง กำลังสร้างไฟล์ Excel 25 คอลัมน์ (.xlsx)...',
                     'done': False
                 }
             excel_exporter.export_land_records_to_excel(records, excel_path)
         else:
             # Extract data from PDF (multi-page supported)
-            gemini_key = database.get_setting('gemini_api_key') or os.environ.get('GEMINI_API_KEY')
             records = []
             for p_path in saved_pdf_paths:
                 recs = extractor.extract_pdf_data(p_path, progress_callback=on_progress, doc_type=doc_type, api_key=gemini_key)

@@ -84,18 +84,19 @@ def _parse_int_amount(val_str):
 def _get_page_lines_with_coords(page):
     """
     Extract lines from a PDF page using native text words sorted by Y and X.
-    Falls back to OCR if native text is empty.
+    Falls back to OCR ONLY if the page has no native text AND contains a scanned raster image.
     Returns (lines_list, full_text_str)
     where each item in lines_list is {'y': float, 'words': [(x0, x1, text), ...], 'text': str}
     """
     words = page.get_text("words")
-    if not words or len(words) < 5:
-        # If there are no words and no raster images on the page, it's a blank/separator page (e.g. dotted line only)
-        if not words and len(page.get_images()) == 0:
+    meaningful_words = [w for w in words if re.sub(r'[\.\-_\s]+', '', w[4])]
+    if not meaningful_words:
+        # If there are no raster images on the page, it's a blank/separator page (e.g. dotted line only)
+        if len(page.get_images()) == 0:
             return [], ""
-        # Fallback to OCR if scanned image page
+        # Fallback to OCR ONLY if scanned image page with no native text
         try:
-            pix = page.get_pixmap(dpi=200)
+            pix = page.get_pixmap(dpi=150)
             img = Image.open(io.BytesIO(pix.tobytes("png")))
             ocr_txt = pytesseract.image_to_string(img, lang='tha+eng')
             raw_lines = [line.strip() for line in ocr_txt.splitlines() if line.strip()]
@@ -915,40 +916,43 @@ def _match_detail_page_for_summary_item(s_item, candidate_pages, used_detail_ids
     return None
 
 
-def extract_land_pdf_to_records(pdf_paths, progress_callback=None, start_seq=1):
+def extract_land_pdf_to_records(pdf_paths, progress_callback=None, start_seq=1, _preparsed_pages=None):
     """
     Accepts either a single PDF path (str) or a list of PDF paths.
     Extracts all land records in the 25-column structure.
     """
-    if isinstance(pdf_paths, str):
-        pdf_paths = [pdf_paths]
+    if _preparsed_pages is not None:
+        all_pages_meta = _preparsed_pages
+    else:
+        if isinstance(pdf_paths, str):
+            pdf_paths = [pdf_paths]
 
-    all_pages_meta = []
-    total_pages_all = 0
+        all_pages_meta = []
+        total_pages_all = 0
 
-    for path in pdf_paths:
-        doc = fitz.open(path)
-        total_pages_all += len(doc)
-        doc.close()
+        for path in pdf_paths:
+            doc = fitz.open(path)
+            total_pages_all += len(doc)
+            doc.close()
 
-    processed_pages = 0
-    for file_idx, path in enumerate(pdf_paths):
-        doc = fitz.open(path)
-        fname = os.path.basename(path)
-        for pno in range(len(doc)):
-            processed_pages += 1
-            if progress_callback:
-                progress_callback(processed_pages, total_pages_all)
-            page = doc[pno]
-            p_info = classify_land_page(page)
-            p_info['file_path'] = path
-            p_info['file_name'] = fname
-            p_info['page_no'] = pno + 1
-            all_pages_meta.append(p_info)
-        doc.close()
+        processed_pages = 0
+        for file_idx, path in enumerate(pdf_paths):
+            doc = fitz.open(path)
+            fname = os.path.basename(path)
+            for pno in range(len(doc)):
+                processed_pages += 1
+                if progress_callback:
+                    progress_callback(processed_pages, total_pages_all)
+                page = doc[pno]
+                p_info = classify_land_page(page)
+                p_info['file_path'] = path
+                p_info['file_name'] = fname
+                p_info['page_no'] = pno + 1
+                all_pages_meta.append(p_info)
+            doc.close()
 
-    # Attach detail continuation pages (detail_cont) to their parent detail pages and re-parse
-    _attach_detail_continuations(all_pages_meta)
+        # Attach detail continuation pages (detail_cont) to their parent detail pages and re-parse
+        _attach_detail_continuations(all_pages_meta)
 
     # Group by person / summary report, or pair summary items with detail pages by deed_no + survey_page
     summary_groups = []
@@ -1185,7 +1189,7 @@ def extract_land_pdf_to_records(pdf_paths, progress_callback=None, start_seq=1):
     return records
 
 
-def merge_and_sort_land_pdfs(pdf_paths, output_pdf_path, sort_strategy='smart_deed'):
+def merge_and_sort_land_pdfs(pdf_paths, output_pdf_path, sort_strategy='smart_deed', progress_callback=None, return_pages_meta=False):
     """
     Merges multiple Land PDF files, automatically sorting pages so that:
       For each person (Summary Page):
@@ -1197,11 +1201,20 @@ def merge_and_sort_land_pdfs(pdf_paths, output_pdf_path, sort_strategy='smart_de
     all_pages_meta = []
 
     try:
-        for f_idx, path in enumerate(pdf_paths):
+        total_pages_all = 0
+        for path in pdf_paths:
             doc = fitz.open(path)
             open_docs[path] = doc
+            total_pages_all += len(doc)
+
+        processed_pages = 0
+        for f_idx, path in enumerate(pdf_paths):
+            doc = open_docs[path]
             fname = os.path.basename(path)
             for pno in range(len(doc)):
+                processed_pages += 1
+                if progress_callback:
+                    progress_callback(processed_pages, total_pages_all)
                 p_info = classify_land_page(doc[pno])
                 p_info['file_path'] = path
                 p_info['file_name'] = fname
@@ -1404,6 +1417,8 @@ def merge_and_sort_land_pdfs(pdf_paths, output_pdf_path, sort_strategy='smart_de
 
         report['total_output_pages'] = len(final_pages_to_write)
         report['is_complete'] = (len(report['missing_details']) == 0 and len(report['orphan_details']) == 0)
+        if return_pages_meta:
+            return report, all_pages_meta
         return report
 
     finally:
