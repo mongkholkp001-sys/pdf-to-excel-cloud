@@ -438,6 +438,9 @@ def upload_pdf():
 
     stored_pdf_name = os.path.basename(saved_pdf_paths[0])
     pdf_path = saved_pdf_paths[0]
+    if doc_type in ['uncertified', 'certified'] and user_can_land(user) and land_extractor.is_land_pdf(saved_pdf_paths):
+        doc_type = 'land'
+        type_label = "Land"
     
     if job_id:
         CONVERSION_PROGRESS[job_id] = {

@@ -10,6 +10,23 @@ import fitz  # PyMuPDF
 from PIL import Image
 import pytesseract
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+for _t_candidate in [
+    os.path.join(BASE_DIR, 'tesseract', 'tesseract.exe'),
+    r'C:\Program Files\Tesseract-OCR\tesseract.exe',
+    r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
+]:
+    if os.path.exists(_t_candidate):
+        pytesseract.pytesseract.tesseract_cmd = _t_candidate
+        break
+
+_tessdata_dir = os.path.join(BASE_DIR, 'tessdata')
+if os.path.exists(os.path.join(_tessdata_dir, 'tha.traineddata')):
+    os.environ['TESSDATA_PREFIX'] = _tessdata_dir
+elif os.path.exists(os.path.join(BASE_DIR, 'tha.traineddata')):
+    os.environ['TESSDATA_PREFIX'] = BASE_DIR
+
 LAND_COLUMNS_23 = [
     'ลำดับ',
     'พิมพ์เมื่อ',
@@ -91,16 +108,30 @@ def _get_page_lines_with_coords(page):
     words = page.get_text("words")
     meaningful_words = [w for w in words if re.sub(r'[\.\-_\s]+', '', w[4])]
     if not meaningful_words:
+        imgs = page.get_images(full=True)
         # If there are no raster images on the page, it's a blank/separator page (e.g. dotted line only)
-        if len(page.get_images()) == 0:
+        if not imgs:
             return [], ""
-        # Fallback to OCR ONLY if scanned image page with no native text
+        # Fallback to fast OCR ONLY if scanned image page with no native text
         try:
-            pix = page.get_pixmap(dpi=150)
-            img = Image.open(io.BytesIO(pix.tobytes("png")))
-            ocr_txt = pytesseract.image_to_string(img, lang='tha+eng')
+            img = None
+            if len(imgs) == 1 and page.parent is not None:
+                try:
+                    base_img = page.parent.extract_image(imgs[0][0])
+                    if base_img and base_img.get("width", 0) >= 600:
+                        img = Image.open(io.BytesIO(base_img["image"])).convert("L")
+                except Exception:
+                    img = None
+            if img is None:
+                pix = page.get_pixmap(dpi=220)
+                img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("L")
+            try:
+                ocr_txt = pytesseract.image_to_string(img, lang='tha', config='--psm 6')
+            except Exception:
+                ocr_txt = pytesseract.image_to_string(img, lang='tha+eng')
+            ocr_txt = ocr_txt.replace('\u0e4d\u0e32', '\u0e33')
             raw_lines = [line.strip() for line in ocr_txt.splitlines() if line.strip()]
-            lines_list = [{'y': idx * 15.0, 'words': [(0, 100, l)], 'text': l} for idx, l in enumerate(raw_lines)]
+            lines_list = [{'y': idx * 15.0, 'words': [(0, 100, l)], 'text': l, 'is_ocr': True} for idx, l in enumerate(raw_lines)]
             return lines_list, "\n".join(raw_lines)
         except Exception:
             return [], ""
@@ -108,6 +139,7 @@ def _get_page_lines_with_coords(page):
     lines = []
     for w in words:
         x0, y0, x1, y1, text = w[0], w[1], w[2], w[3], w[4]
+        text = text.replace('\u0e4d\u0e32', '\u0e33')
         if not text.strip():
             continue
         placed = False
@@ -126,6 +158,38 @@ def _get_page_lines_with_coords(page):
 
     full_text = "\n".join(l['text'] for l in lines)
     return lines, full_text
+
+
+def is_land_pdf(pdf_paths):
+    """
+    Fast check (without OCR) to determine if uploaded PDF(s) are Department of Lands documents.
+    Used to auto-switch mode if a user uploads a Land PDF while on the default Civil Registration tab.
+    """
+    if isinstance(pdf_paths, str):
+        pdf_paths = [pdf_paths]
+    land_keywords = [
+        'รายละเอียดอนุมัติการจดทะเบียนสิทธิและนิติกรรม',
+        'รายการผลการสอบถามข้อมูลตรวจสอบหลักทรัพย์',
+        'ผู้ถือกรรมสิทธิ์',
+        'โฉนดที่ดิน',
+        'หน้าสำรวจ',
+        'หนังสือกรรมสิทธิ์ห้องชุด',
+        'หนังสือรับรองการทำประโยชน์',
+        'ราคาประเมินที่ดิน',
+        'รายการภาระผูกพัน'
+    ]
+    for path in pdf_paths[:3]:
+        try:
+            doc = fitz.open(path)
+            for pno in range(min(len(doc), 5)):
+                txt = doc[pno].get_text("text") or ""
+                if any(k in txt for k in land_keywords):
+                    doc.close()
+                    return True
+            doc.close()
+        except Exception:
+            pass
+    return False
 
 
 def classify_land_page(page):
@@ -160,32 +224,43 @@ def classify_land_page(page):
     if not lines:
         return info
 
-    # Extract print date
-    m_date = re.search(r'(?:วันที่พิมพ์|พิมพ์เมื่อ)\s*[:\-]?\s*(\d{1,2}\s+[^\s\n]+\s+\d{4})', full_text)
+    # Extract print date (tolerates OCR missing tone marks / karans)
+    m_date = re.search(r'(?:วันท[ี่ิ]*พิมพ[์]*|พิมพ[์]*เมื่อ)\s*[:\-]?\s*(\d{1,2}\s+[^\s\n]+\s+\d{4})', full_text)
     if m_date:
         info['print_date'] = m_date.group(1).strip()
 
-    # 1. Check if Summary Page (First page of a person's report)
-    if 'รายการผลการสอบถามข้อมูลตรวจสอบหลักทรัพย์' in full_text or 'ชื่อเจ้าของหลักทรัพย์' in full_text:
+    # 1. Check if Summary Page (First page of a person's report - supports both digital text and OCR)
+    is_summary_page = (
+        'รายการผลการสอบถาม' in full_text
+        or 'ตรวจสอบหลักทรัพย' in full_text
+        or 'ชื่อเจ้าของหลักทรัพย' in full_text
+        or 'ชื่อเจาของหลักทรัพย' in full_text
+        or bool(re.search(r'ช[ื่ิ]*อเจ[้่า]*ของหลักทรัพย', full_text))
+        or ('รวม 462 สำนักงาน' in full_text and 'เลขประจำตัวประชาชน' in full_text)
+    )
+    if is_summary_page:
         info['page_type'] = 'summary'
-        m_cid = re.search(r'เลขประจำตัวประชาชน\s*[:\-]?\s*([\d\-\s]{13,17})', full_text)
+        m_cid = re.search(r'เลขประจ[ำํา]ตัวประชาชน\s*[:\-]?\s*([\d\-\s]{13,17})', full_text)
         if m_cid:
             info['cid'] = _clean_digits(m_cid.group(1))
             info['cid_dashed'] = _format_cid_dashed(m_cid.group(1))
 
-        m_name = re.search(r'ชื่อเจ้าของหลักทรัพย์\s*[:\-]?\s*([^\n\r]+)', full_text)
+        m_name = re.search(r'ช[ื่ิ]*อเจ[้่า]*ของหลักทรัพย[์]*\s*[:\-]?\s*([^\n\r]+)', full_text)
         if m_name:
             raw_name = m_name.group(1).strip()
-            raw_name = re.split(r'\s{2,}|เลขประจำตัว', raw_name)[0].strip()
+            raw_name = re.split(r'\s{2,}|เลขประจ', raw_name)[0].strip()
             info['owner_name'] = raw_name
 
-        m_cnt = re.search(r'จำนวนรายการที่ค้นพบ\s*(\d+)\s*รายการ', full_text)
+        m_cnt = re.search(r'จ[ำํา]นวนรายการท[ี่ิ]*ค[้่]*นพบ\s*(\d+)\s*รายการ', full_text)
         if m_cnt:
             info['found_count'] = int(m_cnt.group(1))
-        elif 'ไม่พบข้อมูล' in full_text and 'ตรวจสอบพบข้อมูลจำนวน' not in full_text:
+        elif ('ไม่พบข้อมูล' in full_text or 'ไมพบขอมูล' in full_text) and 'ตรวจสอบพบ' not in full_text:
             info['found_count'] = 0
 
-        info['summary_items'] = parse_summary_table(lines)
+        items = parse_summary_table(lines)
+        if not items:
+            items = parse_summary_table_ocr(full_text)
+        info['summary_items'] = items
         return info
 
     # 2. Check if Detail Start Page:
@@ -442,6 +517,196 @@ def _finalize_summary_item(raw):
     }
 
 
+def _clean_ocr_office_name(office_str):
+    s = re.sub(r'\s+', ' ', (office_str or '')).strip()
+    s = re.sub(r'ส[ำํา]นักงานท[ี่ิ]*ดิน', 'สำนักงานที่ดิน', s)
+    s = re.sub(r'บุรีรัมย(?!์)', 'บุรีรัมย์', s)
+    s = re.sub(r'สุราษฎร(?!์)', 'สุราษฎร์', s)
+    s = re.sub(r'นครสวรรค(?!์)', 'นครสวรรค์', s)
+    s = re.sub(r'เพชรบูรณ(?!์)', 'เพชรบูรณ์', s)
+    s = re.sub(r'กาญจนบุร[ีิ]', 'กาญจนบุรี', s)
+    s = re.sub(r'นนทบุร[ีิ]', 'นนทบุรี', s)
+    return s
+
+
+def parse_summary_table_ocr(full_text):
+    """
+    Fallback parser when Page 1 (Summary Page) is a scanned image (OCR text without X coordinates).
+    Extracts each asset row + matches the clean Land Office name from the bottom summary section.
+    """
+    if not full_text:
+        return []
+
+    raw_lines = [l.strip() for l in full_text.splitlines() if l.strip()]
+
+    # 1. Extract clean list of found land offices from bottom section:
+    # e.g. "1. สำนักงานทีดินจังหวัดนนทบุรี สาขาบางใหญ่ พบ 2 รายการ"
+    found_offices = []
+    in_found_section = False
+    for l in raw_lines:
+        if 'ผลการตรวจสอบ' in l or 'ตรวจสอบพบข' in l:
+            in_found_section = True
+            continue
+        if in_found_section and ('ตรวจสอบไม่พบ' in l or 'ตรวจสอบไมพบ' in l):
+            break
+        if in_found_section:
+            m_off = re.match(r'^\d+[\.\s]+(ส[ำํา]นักงาน.+?)(?:\s+พบ\s+\d+\s*รายการ.*)?$', l)
+            if m_off:
+                clean_off = _clean_ocr_office_name(m_off.group(1))
+                if clean_off and clean_off not in found_offices:
+                    found_offices.append(clean_off)
+
+    # 2. Locate table body lines between header and footer
+    start_idx = 0
+    end_idx = len(raw_lines)
+    for idx, l in enumerate(raw_lines):
+        if any(k in l for k in ['ลำดับท', 'ประเภทหลักทรัพย', 'ตร.ว.)/(ตร.ม.)']):
+            start_idx = idx + 1
+        elif start_idx > 0 and any(k in l for k in ['ผลการตรวจสอบข', 'ตรวจสอบพบข', 'ตรวจสอบไม่พบ', 'ตรวจสอบไมพบ']):
+            end_idx = idx
+            break
+
+    body_lines = raw_lines[start_idx:end_idx] if start_idx > 0 else raw_lines
+
+    # 3. Group lines into item blocks starting with "<seq> <asset_type>..."
+    row_blocks = []
+    cur_block = None
+    row_start_re = re.compile(
+        r'^(\d+)\s+[^\d]{0,6}?(โฉนด[^\s]*|หนังสือรับรอง[^\d]*|หนังสือกรรมสิทธ[^\d]*|หนังสือแสดง[^\d]*|อาคารโรงเรือน|ห้องชุด|น\.ส\.[^\s]*)(.*)$'
+    )
+
+    for l in body_lines:
+        m_start = row_start_re.match(l)
+        if m_start:
+            if cur_block:
+                row_blocks.append(cur_block)
+            cur_block = {
+                'seq': int(m_start.group(1)),
+                'raw_type': m_start.group(2).strip(),
+                'first_rest': m_start.group(3).strip(),
+                'lines': [l]
+            }
+        elif cur_block is not None:
+            cur_block['lines'].append(l)
+
+    if cur_block:
+        row_blocks.append(cur_block)
+
+    items = []
+    for blk in row_blocks:
+        seq = blk['seq']
+        raw_type = blk['raw_type']
+        first_rest = blk['first_rest']
+        block_text = "\n".join(blk['lines'])
+
+        if 'อาคารโรงเรือน' in raw_type or 'อาคารโรงเรือน' in block_text:
+            asset_type = 'อาคารโรงเรือน'
+        elif 'ห้องชุด' in raw_type or 'ห้องชุด' in block_text:
+            asset_type = 'หนังสือกรรมสิทธิ์ห้องชุด'
+        elif 'รับรองการท' in raw_type or 'น.ส.3' in block_text:
+            asset_type = 'หนังสือรับรองการทำประโยชน์ (น.ส.3 ก)'
+        else:
+            asset_type = 'โฉนดที่ดิน'
+
+        deed_no = ''
+        if asset_type != 'อาคารโรงเรือน':
+            m_dn = re.search(r'(?:โฉนดเลขท[ี่ิ]*|เลขท[ี่ิ]*หลักทรัพย[์]*|ห[้่]*องชุดเลขท[ี่ิ]*)\s*([\d/\-,]+)', block_text)
+            if m_dn:
+                deed_no = _normalize_deed_no(m_dn.group(1))
+            else:
+                m_dn2 = re.match(r'^([\d/\-,]+)\b', first_rest)
+                if m_dn2:
+                    deed_no = _normalize_deed_no(m_dn2.group(1))
+
+        survey_page = '-'
+        m_surv = re.search(r'หน[้่า]*ส[ำํา]รวจ\s*(\d+)', block_text)
+        if not m_surv:
+            m_surv = re.search(r'(\d+)\s+ระวาง', block_text)
+        if m_surv:
+            survey_page = m_surv.group(1).strip()
+
+        land_no = '-'
+        m_lno = re.search(r'เลขท[ี่ิ]*ดิน\s*(\d+)', block_text)
+        if m_lno:
+            land_no = m_lno.group(1).strip()
+
+        tambon = '-'
+        m_tb = re.search(r'(?:ต\.|ตำบล|แขวง)\s*([^\s|\n]+)', block_text)
+        if m_tb:
+            tambon = m_tb.group(1).strip()
+
+        amphoe = '-'
+        m_am = re.search(r'(?:อ\.|อำเภอ|เขต)\s*([^\s|\n]+)', block_text)
+        if m_am:
+            amphoe = m_am.group(1).strip()
+
+        province = '-'
+        m_pv = re.search(r'(?:จ\.|จังหวัด)\s*([^\s|\n]+)', block_text)
+        if m_pv and m_pv.group(1).strip() not in ['นนทบุรี', 'บุรีรัมย์', 'นครปฐม'] and 'สำนักงาน' in m_pv.group(0):
+            pass
+        m_pv_explicit = re.search(r'จ\.?\s*([^\s|\n]+)', block_text)
+        if m_pv_explicit:
+            province = _clean_ocr_office_name(m_pv_explicit.group(1).strip())
+
+        area_str = ''
+        if asset_type == 'อาคารโรงเรือน' or 'ห้องชุด' in asset_type:
+            m_ar_b = re.search(r'(\d+(?:\.\d+)?)\s*$', blk['lines'][0].strip())
+            if m_ar_b:
+                area_str = m_ar_b.group(1).strip()
+        else:
+            m_ar_l = re.search(r'(\d+)\s*-\s*(\d+)\s*-\s*([\d\.]+)', blk['lines'][0])
+            if m_ar_l:
+                r_v, n_v, w_v = m_ar_l.group(1), m_ar_l.group(2), m_ar_l.group(3)
+                # Fix OCR missing decimal point in tarang-wa e.g. '620' -> '62.0' (since tarang-wa is always < 100)
+                if '.' not in w_v and len(w_v) >= 3 and int(w_v) >= 100:
+                    w_v = f"{int(w_v[:-1])}.{w_v[-1]}"
+                area_str = f"{r_v}-{n_v}-{w_v}"
+
+        building_info = '-'
+        if asset_type == 'อาคารโรงเรือน':
+            b_type = 'บ้านพักอาศัย'
+            m_bt = re.search(r'(บ[้่า]*นพักอาศัย[^\s|\n]+|ทาวน[์]*เฮาส[์]*[^\s|\n]+|ตึกแถว[^\s|\n]+|อาคาร[^\s|\n]+)', block_text)
+            if m_bt:
+                b_type = m_bt.group(1).replace('บานพัก', 'บ้านพัก').replace('สองชัน', 'สองชั้น').replace('ชันเดียว', 'ชั้นเดียว')
+            m_bno = re.search(r'บ[้่า]*นเลขท[ี่ิ]*\s*([^\s|\n]+)', block_text)
+            if m_bno:
+                building_info = f"{b_type} | เลขที่ {m_bno.group(1).strip()}"
+
+        # Match land office from found_offices
+        office_str = '-'
+        if len(found_offices) == 1:
+            office_str = found_offices[0]
+        elif len(found_offices) > 1:
+            best_off = None
+            best_score = -1
+            clean_blk = _clean_ocr_office_name(block_text)
+            for cand_off in found_offices:
+                # Extract tokens from cand_off like จังหวัดX, สาขาY
+                tokens = re.findall(r'(?:จังหวัด|สาขา|ส่วนแยก)([^\s]+)', cand_off)
+                score = sum(1 for tk in tokens if tk in clean_blk)
+                if score > best_score:
+                    best_score = score
+                    best_off = cand_off
+            office_str = best_off or found_offices[0]
+
+        items.append({
+            'seq': seq,
+            'asset_type': asset_type,
+            'deed_no': deed_no,
+            'loc_text': block_text,
+            'survey_page': survey_page,
+            'land_no': land_no,
+            'tambon': tambon,
+            'amphoe': amphoe,
+            'province': province,
+            'land_office': office_str,
+            'area': area_str,
+            'building_info': building_info
+        })
+
+    return items
+
+
 def parse_detail_page(lines, full_text, print_date=''):
     """
     Parse a Detail Page (รายละเอียดอนุมัติการจดทะเบียนสิทธิและนิติกรรม)
@@ -521,11 +786,10 @@ def parse_detail_page(lines, full_text, print_date=''):
                 b_type_top = m_std_b.group(1).strip()
                 b_no_top = m_std_b.group(2).strip()
                 data['building_info'] = f"{b_type_top} | เลขที่ {b_no_top}"
-                if data['deed_no'] == '-':
-                    data['deed_no'] = _normalize_deed_no(b_no_top)
+                data['house_no'] = _normalize_deed_no(b_no_top)
 
-        # เลขที่ (โฉนด / น.ส.3) - be careful not to overwrite ห้องชุดเลขที่ or match เลขที่ดิน
-        if data['deed_no'] == '-':
+        # เลขที่ (โฉนด / น.ส.3) - be careful not to overwrite ห้องชุดเลขที่ or match เลขที่ดิน or บ้านเลขที่
+        if data['deed_no'] == '-' and 'อาคารโรงเรือน' not in data['asset_type']:
             for idx, (x0, x1, wtxt) in enumerate(l['words']):
                 if wtxt == 'เลขที่':
                     if idx + 1 < len(l['words']):
@@ -723,6 +987,11 @@ def parse_detail_page(lines, full_text, print_date=''):
             m_bval = re.search(r'ราคาประเมินสิ่งปลูกสร้าง\s+([^\s]+)\s*บาท', t)
             if m_bval:
                 data['building_value'] = _parse_int_amount(m_bval.group(1))
+
+    # On standalone อาคารโรงเรือน pages, Department of Lands prints the building appraised value in the first slot
+    if 'อาคารโรงเรือน' in data['asset_type'] and data['building_value'] == 0 and data['land_value'] > 0:
+        data['building_value'] = data['land_value']
+        data['land_value'] = 0
 
     # 7. Seizure Status (รายการอายัด) & Obligation/Mortgage (รายการภาระผูกพัน)
     seizure_y = None
@@ -1059,6 +1328,15 @@ def extract_land_pdf_to_records(pdf_paths, progress_callback=None, start_seq=1, 
             summary_bldg_items = [it for it in sum_items if 'อาคารโรงเรือน' in it.get('asset_type', '') and not it.get('deed_no')]
             person_records = []
 
+            # Prefer clean digital owner_name from detail page if summary page was OCR
+            if grp_details and any(l.get('is_ocr') for l in sum_page.get('lines', [])):
+                for dp_cand in grp_details:
+                    d_name = (dp_cand.get('detail_data') or {}).get('owner_name')
+                    if d_name:
+                        owner_name = d_name
+                        sum_page['owner_name'] = d_name
+                        break
+
             for item_idx, s_item in enumerate(sum_items):
                 deed_no = s_item['deed_no']
                 is_bldg_row = ('อาคารโรงเรือน' in s_item.get('asset_type', '') and not deed_no)
@@ -1074,6 +1352,17 @@ def extract_land_pdf_to_records(pdf_paths, progress_callback=None, start_seq=1, 
                 if b_info == '-' and s_item.get('building_info', '-') != '-':
                     b_info = s_item['building_info']
 
+                # If this is a standalone อาคารโรงเรือน detail page whose building is ALREADY included on one of this person's land deed rows, skip duplicate row
+                if is_bldg_row and has_land_or_condo and person_records:
+                    b_house_no = det.get('house_no', '')
+                    already_on_land = any(
+                        (b_info != '-' and b_info in pr.get('building_info', ''))
+                        or (b_house_no and f"เลขที่ {b_house_no}" in pr.get('building_info', ''))
+                        for pr in person_records
+                    )
+                    if already_on_land:
+                        continue
+
                 area_val = det.get('area_text', '-')
                 if area_val == '-' or not area_val:
                     area_val = _format_summary_area(s_item)
@@ -1082,7 +1371,7 @@ def extract_land_pdf_to_records(pdf_paths, progress_callback=None, start_seq=1, 
                     'no': person_seq,
                     'print_date': det.get('print_date') or print_date or '-',
                     'cid': cid or det.get('cid') or '-',
-                    'full_name': owner_name or det.get('owner_name') or '-',
+                    'full_name': det.get('owner_name') or owner_name or '-',
                     'search_result': 'พบทรัพย์',
                     'asset_type': det.get('asset_type') or s_item.get('asset_type') or 'โฉนดที่ดิน',
                     'deed_no': (det.get('deed_no') if det.get('deed_no', '-') != '-' else deed_no) or '-',
@@ -1303,6 +1592,15 @@ def merge_and_sort_land_pdfs(pdf_paths, output_pdf_path, sort_strategy='smart_de
             sum_items = sp['summary_items']
             has_land_or_condo = any('อาคารโรงเรือน' not in it.get('asset_type', '') and it.get('deed_no') for it in sum_items)
 
+            # Upgrade owner_name from matched digital detail page if summary page was OCR
+            if any(l.get('is_ocr') for l in sp.get('lines', [])):
+                for item_idx in range(len(sum_items)):
+                    mdp = prematched_merge_map.get((id(grp), item_idx))
+                    if mdp and (mdp.get('detail_data') or {}).get('owner_name'):
+                        owner_name = mdp['detail_data']['owner_name']
+                        sp['owner_name'] = owner_name
+                        break
+
             person_rep = {
                 'seq': grp_idx,
                 'owner_name': owner_name,
@@ -1327,9 +1625,13 @@ def merge_and_sort_land_pdfs(pdf_paths, output_pdf_path, sort_strategy='smart_de
                 if matched_dp:
                     _append_detail_with_cont(matched_dp)
                     report['matched_count'] += 1
+                    det_d = matched_dp['detail_data']
+                    disp_deed = target_deed or det_d.get('deed_no', '-')
+                    if disp_deed == '-' and det_d.get('house_no'):
+                        disp_deed = f"บ้านเลขที่ {det_d['house_no']}"
                     person_rep['matched_deeds'].append({
                         'seq': s_item['seq'],
-                        'deed_no': target_deed or matched_dp['detail_data'].get('deed_no', '-'),
+                        'deed_no': disp_deed,
                         'asset_type': s_item['asset_type'],
                         'detail_file': matched_dp['file_name'],
                         'detail_page': matched_dp['page_no']
@@ -1348,6 +1650,8 @@ def merge_and_sort_land_pdfs(pdf_paths, output_pdf_path, sort_strategy='smart_de
                     }
                     report['missing_details'].append(missing_entry)
                     person_rep['missing_deeds'].append(missing_entry)
+
+            person_rep['expected_count'] = len(person_rep['matched_deeds']) + len(person_rep['missing_deeds'])
 
             # Pass 2 for this person: Keep any truly unmatched detail pages belonging to THIS person right here
             for dp in detail_pool:
