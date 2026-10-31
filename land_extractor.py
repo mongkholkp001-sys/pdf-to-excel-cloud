@@ -6,9 +6,12 @@ land_extractor.py - ระบบสกัดข้อมูลรายงาน
 import os
 import re
 import io
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import fitz  # PyMuPDF
 from PIL import Image
 import pytesseract
+
+OCR_WORKERS = int(os.environ.get('OCR_WORKERS', min(4, max(2, (os.cpu_count() or 2)))))
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -98,6 +101,25 @@ def _parse_int_amount(val_str):
         return 0
 
 
+def _ocr_image_bytes_to_lines(img_bytes):
+    """Run fast resized grayscale OCR on image bytes and return (lines_list, full_text)."""
+    try:
+        img = Image.open(io.BytesIO(img_bytes)).convert("L")
+        if img.width > 960:
+            new_h = int(img.height * (960 / img.width))
+            img = img.resize((960, new_h), Image.Resampling.BILINEAR)
+        try:
+            ocr_txt = pytesseract.image_to_string(img, lang='tha', config='--psm 6')
+        except Exception:
+            ocr_txt = pytesseract.image_to_string(img, lang='tha+eng')
+        ocr_txt = ocr_txt.replace('\u0e4d\u0e32', '\u0e33')
+        raw_lines = [line.strip() for line in ocr_txt.splitlines() if line.strip()]
+        lines_list = [{'y': idx * 15.0, 'words': [(0, 100, l)], 'text': l, 'is_ocr': True} for idx, l in enumerate(raw_lines)]
+        return lines_list, "\n".join(raw_lines)
+    except Exception:
+        return [], ""
+
+
 def _get_page_lines_with_coords(page):
     """
     Extract lines from a PDF page using native text words sorted by Y and X.
@@ -114,25 +136,18 @@ def _get_page_lines_with_coords(page):
             return [], ""
         # Fallback to fast OCR ONLY if scanned image page with no native text
         try:
-            img = None
+            img_bytes = None
             if len(imgs) == 1 and page.parent is not None:
                 try:
                     base_img = page.parent.extract_image(imgs[0][0])
                     if base_img and base_img.get("width", 0) >= 600:
-                        img = Image.open(io.BytesIO(base_img["image"])).convert("L")
+                        img_bytes = base_img["image"]
                 except Exception:
-                    img = None
-            if img is None:
-                pix = page.get_pixmap(dpi=220)
-                img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("L")
-            try:
-                ocr_txt = pytesseract.image_to_string(img, lang='tha', config='--psm 6')
-            except Exception:
-                ocr_txt = pytesseract.image_to_string(img, lang='tha+eng')
-            ocr_txt = ocr_txt.replace('\u0e4d\u0e32', '\u0e33')
-            raw_lines = [line.strip() for line in ocr_txt.splitlines() if line.strip()]
-            lines_list = [{'y': idx * 15.0, 'words': [(0, 100, l)], 'text': l, 'is_ocr': True} for idx, l in enumerate(raw_lines)]
-            return lines_list, "\n".join(raw_lines)
+                    img_bytes = None
+            if img_bytes is None:
+                pix = page.get_pixmap(dpi=180)
+                img_bytes = pix.tobytes("png")
+            return _ocr_image_bytes_to_lines(img_bytes)
         except Exception:
             return [], ""
 
@@ -192,7 +207,7 @@ def is_land_pdf(pdf_paths):
     return False
 
 
-def classify_land_page(page):
+def classify_land_page(page, pre_lines=None):
     """
     Classifies a page in a Land Department PDF:
     Returns a dict:
@@ -205,7 +220,10 @@ def classify_land_page(page):
       - summary_items: list of dicts (from summary table)
       - detail_data: dict (if page_type == 'detail')
     """
-    lines, full_text = _get_page_lines_with_coords(page)
+    if pre_lines is not None:
+        lines, full_text = pre_lines
+    else:
+        lines, full_text = _get_page_lines_with_coords(page)
 
     info = {
         'page_type': 'other',
@@ -785,8 +803,11 @@ def parse_detail_page(lines, full_text, print_date=''):
             if m_std_b and 'ตำบล' not in m_std_b.group(1):
                 b_type_top = m_std_b.group(1).strip()
                 b_no_top = m_std_b.group(2).strip()
-                data['building_info'] = f"{b_type_top} | เลขที่ {b_no_top}"
-                data['house_no'] = _normalize_deed_no(b_no_top)
+                if b_no_top not in ['เล่ม', 'หน้า', 'ขนาด', 'กว้าง', '-', 'ตำบล', 'หมู่ที่']:
+                    data['building_info'] = f"{b_type_top} | เลขที่ {b_no_top}"
+                    data['house_no'] = _normalize_deed_no(b_no_top)
+                else:
+                    data['building_info'] = b_type_top
 
         # เลขที่ (โฉนด / น.ส.3) - be careful not to overwrite ห้องชุดเลขที่ or match เลขที่ดิน or บ้านเลขที่
         if data['deed_no'] == '-' and 'อาคารโรงเรือน' not in data['asset_type']:
@@ -867,7 +888,9 @@ def parse_detail_page(lines, full_text, print_date=''):
             if 'ขนาด' in t or 'ชั้นเนื้อที่' in t or (cur_b_type and t.startswith('เลขที่')):
                 m_bno = re.search(r'เลขที่\s*([^\s]+?)(?:\s+ขนาด|\s+กว้าง|$)', t)
                 if m_bno:
-                    cur_b_no = m_bno.group(1).strip()
+                    cand_bno = m_bno.group(1).strip()
+                    if cand_bno not in ['เล่ม', 'หน้า', 'ขนาด', 'กว้าง', '-', 'ตำบล', 'หมู่ที่']:
+                        cur_b_no = cand_bno
                 m_ba = re.search(r'เนื้อที่\s*([\d\.,\-]+)\s*ตารางเมตร', t)
                 if m_ba and m_ba.group(1).strip() != '-':
                     ba_str = f"{m_ba.group(1).strip()} ตารางเมตร"
@@ -1185,6 +1208,117 @@ def _match_detail_page_for_summary_item(s_item, candidate_pages, used_detail_ids
     return None
 
 
+def _classify_pdf_pages_fast(pdf_paths, progress_callback=None, open_docs=None):
+    """
+    Classifies all pages across pdf_paths.
+    Digital text and blank pages are classified instantaneously on the main thread (thread-safe PyMuPDF),
+    while scanned image pages are queued and OCR'd in parallel across CPU worker threads.
+    """
+    if isinstance(pdf_paths, str):
+        pdf_paths = [pdf_paths]
+
+    local_docs = {}
+    docs_map = open_docs if open_docs is not None else local_docs
+
+    try:
+        total_pages_all = 0
+        for path in pdf_paths:
+            if path not in docs_map:
+                docs_map[path] = fitz.open(path)
+            total_pages_all += len(docs_map[path])
+
+        all_pages_meta = [None] * total_pages_all
+        ocr_tasks = []  # list of (global_idx, path, fname, pno, img_bytes)
+        processed_pages = 0
+        global_idx = 0
+
+        for path in pdf_paths:
+            doc = docs_map[path]
+            fname = os.path.basename(path)
+            for pno in range(len(doc)):
+                page = doc[pno]
+                words = page.get_text("words")
+                meaningful_words = [w for w in words if re.sub(r'[\.\-_\s]+', '', w[4])]
+
+                if meaningful_words:
+                    # Digital text page -> classify immediately without OCR
+                    p_info = classify_land_page(page)
+                    p_info['file_path'] = path
+                    p_info['file_name'] = fname
+                    p_info['page_idx'] = pno
+                    p_info['page_no'] = pno + 1
+                    all_pages_meta[global_idx] = p_info
+                    processed_pages += 1
+                    if progress_callback:
+                        progress_callback(processed_pages, total_pages_all)
+                else:
+                    imgs = page.get_images(full=True)
+                    if not imgs:
+                        # Blank / separator page
+                        p_info = classify_land_page(None, pre_lines=([], ""))
+                        p_info['file_path'] = path
+                        p_info['file_name'] = fname
+                        p_info['page_idx'] = pno
+                        p_info['page_no'] = pno + 1
+                        all_pages_meta[global_idx] = p_info
+                        processed_pages += 1
+                        if progress_callback:
+                            progress_callback(processed_pages, total_pages_all)
+                    else:
+                        # Scanned image page -> extract bytes on main thread and queue for parallel OCR
+                        img_bytes = None
+                        if len(imgs) == 1:
+                            try:
+                                base_img = doc.extract_image(imgs[0][0])
+                                if base_img and base_img.get("width", 0) >= 600:
+                                    img_bytes = base_img["image"]
+                            except Exception:
+                                img_bytes = None
+                        if img_bytes is None:
+                            pix = page.get_pixmap(dpi=180)
+                            img_bytes = pix.tobytes("png")
+                        ocr_tasks.append((global_idx, path, fname, pno, img_bytes))
+
+                global_idx += 1
+
+        if ocr_tasks:
+            def _ocr_worker(task_tuple):
+                g_idx, f_path, f_name, p_no, ibytes = task_tuple
+                pre_lines = _ocr_image_bytes_to_lines(ibytes)
+                p_info = classify_land_page(None, pre_lines=pre_lines)
+                p_info['file_path'] = f_path
+                p_info['file_name'] = f_name
+                p_info['page_idx'] = p_no
+                p_info['page_no'] = p_no + 1
+                return g_idx, p_info
+
+            workers = min(OCR_WORKERS, len(ocr_tasks))
+            if workers <= 1:
+                for t_item in ocr_tasks:
+                    g_idx, p_info = _ocr_worker(t_item)
+                    all_pages_meta[g_idx] = p_info
+                    processed_pages += 1
+                    if progress_callback:
+                        progress_callback(processed_pages, total_pages_all)
+            else:
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    futures = [pool.submit(_ocr_worker, t_item) for t_item in ocr_tasks]
+                    for fut in as_completed(futures):
+                        g_idx, p_info = fut.result()
+                        all_pages_meta[g_idx] = p_info
+                        processed_pages += 1
+                        if progress_callback:
+                            progress_callback(processed_pages, total_pages_all)
+
+        return all_pages_meta
+    finally:
+        for doc in local_docs.values():
+            try:
+                doc.close()
+            except Exception:
+                pass
+
+
 def extract_land_pdf_to_records(pdf_paths, progress_callback=None, start_seq=1, _preparsed_pages=None):
     """
     Accepts either a single PDF path (str) or a list of PDF paths.
@@ -1193,33 +1327,7 @@ def extract_land_pdf_to_records(pdf_paths, progress_callback=None, start_seq=1, 
     if _preparsed_pages is not None:
         all_pages_meta = _preparsed_pages
     else:
-        if isinstance(pdf_paths, str):
-            pdf_paths = [pdf_paths]
-
-        all_pages_meta = []
-        total_pages_all = 0
-
-        for path in pdf_paths:
-            doc = fitz.open(path)
-            total_pages_all += len(doc)
-            doc.close()
-
-        processed_pages = 0
-        for file_idx, path in enumerate(pdf_paths):
-            doc = fitz.open(path)
-            fname = os.path.basename(path)
-            for pno in range(len(doc)):
-                processed_pages += 1
-                if progress_callback:
-                    progress_callback(processed_pages, total_pages_all)
-                page = doc[pno]
-                p_info = classify_land_page(page)
-                p_info['file_path'] = path
-                p_info['file_name'] = fname
-                p_info['page_no'] = pno + 1
-                all_pages_meta.append(p_info)
-            doc.close()
-
+        all_pages_meta = _classify_pdf_pages_fast(pdf_paths, progress_callback=progress_callback)
         # Attach detail continuation pages (detail_cont) to their parent detail pages and re-parse
         _attach_detail_continuations(all_pages_meta)
 
@@ -1352,16 +1460,43 @@ def extract_land_pdf_to_records(pdf_paths, progress_callback=None, start_seq=1, 
                 if b_info == '-' and s_item.get('building_info', '-') != '-':
                     b_info = s_item['building_info']
 
-                # If this is a standalone อาคารโรงเรือน detail page whose building is ALREADY included on one of this person's land deed rows, skip duplicate row
+                # If this is a standalone อาคารโรงเรือน detail page and this person already has land/condo rows,
+                # merge any missing building house number, building value, or building area into the matching land row
+                # and skip creating a redundant อาคารโรงเรือน row with deed_no = '-'
                 if is_bldg_row and has_land_or_condo and person_records:
                     b_house_no = det.get('house_no', '')
-                    already_on_land = any(
-                        (b_info != '-' and b_info in pr.get('building_info', ''))
-                        or (b_house_no and f"เลขที่ {b_house_no}" in pr.get('building_info', ''))
-                        for pr in person_records
-                    )
-                    if already_on_land:
-                        continue
+                    b_tambon = det.get('tambon') if det.get('tambon', '-') != '-' else s_item.get('tambon', '-')
+                    b_amphoe = det.get('amphoe') if det.get('amphoe', '-') != '-' else s_item.get('amphoe', '-')
+                    target_pr = None
+                    for pr in person_records:
+                        if (b_info != '-' and b_info in pr.get('building_info', '')) or (b_house_no and f"เลขที่ {b_house_no}" in pr.get('building_info', '')):
+                            target_pr = pr
+                            break
+                    if target_pr is None:
+                        for pr in person_records:
+                            if b_tambon != '-' and pr.get('tambon') == b_tambon:
+                                target_pr = pr
+                                break
+                    if target_pr is None:
+                        for pr in person_records:
+                            if b_amphoe != '-' and pr.get('amphoe') == b_amphoe:
+                                target_pr = pr
+                                break
+                    if target_pr is None:
+                        target_pr = person_records[-1]
+
+                    if b_info != '-':
+                        cur_bi = target_pr.get('building_info', '-')
+                        if cur_bi == '-' or (cur_bi in b_info and len(b_info) > len(cur_bi)):
+                            target_pr['building_info'] = b_info
+                        elif b_info not in cur_bi and (not b_house_no or f"เลขที่ {b_house_no}" not in cur_bi):
+                            target_pr['building_info'] = f"{cur_bi}\n{b_info}"
+                    if det.get('building_value', 0) > 0 and target_pr.get('building_value', 0) == 0:
+                        target_pr['building_value'] = det['building_value']
+                    b_area = det.get('building_area') or (_format_summary_area(s_item) if s_item.get('area') else '')
+                    if b_area and b_area != '-' and 'อาคาร' not in target_pr.get('area_text', ''):
+                        target_pr['area_text'] = f"{target_pr['area_text']} | อาคาร {b_area}"
+                    continue
 
                 area_val = det.get('area_text', '-')
                 if area_val == '-' or not area_val:
@@ -1490,26 +1625,7 @@ def merge_and_sort_land_pdfs(pdf_paths, output_pdf_path, sort_strategy='smart_de
     all_pages_meta = []
 
     try:
-        total_pages_all = 0
-        for path in pdf_paths:
-            doc = fitz.open(path)
-            open_docs[path] = doc
-            total_pages_all += len(doc)
-
-        processed_pages = 0
-        for f_idx, path in enumerate(pdf_paths):
-            doc = open_docs[path]
-            fname = os.path.basename(path)
-            for pno in range(len(doc)):
-                processed_pages += 1
-                if progress_callback:
-                    progress_callback(processed_pages, total_pages_all)
-                p_info = classify_land_page(doc[pno])
-                p_info['file_path'] = path
-                p_info['file_name'] = fname
-                p_info['page_idx'] = pno
-                p_info['page_no'] = pno + 1
-                all_pages_meta.append(p_info)
+        all_pages_meta = _classify_pdf_pages_fast(pdf_paths, progress_callback=progress_callback, open_docs=open_docs)
 
         # Attach detail continuation pages (detail_cont) to their parent detail pages
         _attach_detail_continuations(all_pages_meta)

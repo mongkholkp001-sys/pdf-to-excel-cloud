@@ -506,7 +506,7 @@
         discrepancyBody.innerHTML = html;
     }
 
-    // Submit form via AJAX with real-time progress polling
+    // Submit form via AJAX with real-time upload + background extraction progress polling
     uploadForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         if (!selectedFilesList || selectedFilesList.length === 0) {
@@ -517,9 +517,14 @@
         const currentMode = document.getElementById('docTypeInput').value || 'uncertified';
         const jobId = 'job_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
         const formData = new FormData();
-        selectedFilesList.forEach(f => formData.append('pdf_file', f));
+        let totalUploadBytes = 0;
+        selectedFilesList.forEach(f => {
+            formData.append('pdf_file', f);
+            totalUploadBytes += f.size;
+        });
         formData.append('doc_type', currentMode);
         formData.append('job_id', jobId);
+        formData.append('async_mode', '1');
 
         // UI elements
         const progressBar = document.getElementById('progressBar');
@@ -528,10 +533,10 @@
         const progressStatusDetail = document.getElementById('progressStatusDetail');
 
         // Initial Progress State
-        progressBar.style.width = '8%';
-        progressBadge.textContent = '8%';
+        progressBar.style.width = '2%';
+        progressBadge.textContent = '2%';
         progressStageTitle.textContent = 'กำลังอัปโหลดไฟล์ PDF...';
-        progressStatusDetail.textContent = `กำลังส่งไฟล์เข้าสู่เซิร์ฟเวอร์...`;
+        progressStatusDetail.textContent = `กำลังส่งไฟล์เข้าสู่เซิร์ฟเวอร์ (0.00 / ${(totalUploadBytes / (1024*1024)).toFixed(2)} MB)...`;
 
         // Switch to loading UI
         dropZone.classList.add('d-none');
@@ -540,65 +545,111 @@
         resultCard.style.display = 'none';
         discrepancyCard.classList.add('d-none');
 
-        // Poll progress endpoint every 400ms
-        let pollTimer = setInterval(async () => {
-            try {
-                const res = await fetch(`/api/upload-progress/${jobId}`);
-                if (res.ok) {
-                    const info = await res.json();
-                    if (info && info.progress !== undefined) {
-                        const pct = Math.min(Math.max(info.progress, 8), 98);
-                        progressBar.style.width = pct + '%';
-                        progressBadge.textContent = pct + '%';
-                        if (info.message) {
-                            progressStatusDetail.textContent = info.message;
-                            if (pct >= 90) {
-                                progressStageTitle.textContent = 'กำลังบันทึกและสร้างไฟล์ Excel...';
-                            } else if (pct >= 15) {
-                                progressStageTitle.textContent = 'กำลังประมวลผลและสกัดข้อมูลจาก PDF...';
-                            }
-                        }
+        const uploadWithXhr = () => new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', "{{ url_for('upload_pdf') }}", true);
+            xhr.upload.onprogress = (ev) => {
+                if (ev.lengthComputable && ev.total > 0) {
+                    const uploadPct = Math.min(12, Math.max(2, Math.round((ev.loaded / ev.total) * 12)));
+                    progressBar.style.width = uploadPct + '%';
+                    progressBadge.textContent = uploadPct + '%';
+                    const loadedMb = (ev.loaded / (1024 * 1024)).toFixed(2);
+                    const totalMb = (ev.total / (1024 * 1024)).toFixed(2);
+                    if (ev.loaded >= ev.total) {
+                        progressStageTitle.textContent = 'อัปโหลดครบ 100% กำลังเริ่มสกัดข้อมูล...';
+                        progressStatusDetail.textContent = `รับไฟล์ครบ ${totalMb} MB แล้ว กำลังแยกหน้าและสกัดข้อมูล...`;
+                    } else {
+                        progressStageTitle.textContent = 'กำลังอัปโหลดไฟล์ PDF...';
+                        progressStatusDetail.textContent = `กำลังส่งไฟล์เข้าสู่เซิร์ฟเวอร์ (${loadedMb} / ${totalMb} MB)...`;
                     }
                 }
-            } catch (err) {}
-        }, 400);
+            };
+            xhr.onload = () => {
+                try {
+                    const parsed = JSON.parse(xhr.responseText);
+                    resolve(parsed);
+                } catch (parseErr) {
+                    reject(new Error('เซิร์ฟเวอร์ตอบกลับผิดรูปแบบ (' + xhr.status + ')'));
+                }
+            };
+            xhr.onerror = () => reject(new Error('การเชื่อมต่อเครือข่ายขัดข้องขณะอัปโหลดไฟล์'));
+            xhr.send(formData);
+        });
 
         try {
-            const response = await fetch("{{ url_for('upload_pdf') }}", {
-                method: 'POST',
-                body: formData
-            });
+            const initData = await uploadWithXhr();
 
-            clearInterval(pollTimer);
-            const data = await response.json();
-
-            if (!data.success) {
+            if (!initData.success) {
                 loadingDiv.classList.add('d-none');
                 dropZone.classList.remove('d-none');
                 startConvertDiv.classList.remove('d-none');
                 Swal.fire({
                     icon: 'error',
                     title: 'แปลงไฟล์ไม่สำเร็จ',
-                    text: data.error || 'เกิดข้อผิดพลาดในการประมวลผล'
+                    text: initData.error || 'เกิดข้อผิดพลาดในการประมวลผล'
                 });
                 return;
             }
 
-            // 100% Complete
-            progressBar.style.width = '100%';
-            progressBadge.textContent = '100%';
-            progressStageTitle.textContent = 'แปลงไฟล์เสร็จสมบูรณ์ 100%!';
-            progressStatusDetail.textContent = `ประมวลผลเสร็จสิ้น ${data.row_count} รายการ พร้อมดาวน์โหลด`;
+            const finalizeSuccess = (finalData) => {
+                progressBar.style.width = '100%';
+                progressBadge.textContent = '100%';
+                progressStageTitle.textContent = 'แปลงไฟล์เสร็จสมบูรณ์ 100%!';
+                progressStatusDetail.textContent = `ประมวลผลเสร็จสิ้น ${finalData.row_count} รายการ พร้อมดาวน์โหลด`;
 
-            setTimeout(() => {
-                loadingDiv.classList.add('d-none');
-                dropZone.classList.remove('d-none');
-                startConvertDiv.classList.remove('d-none');
-                renderConversionResult(data, true);
-            }, 400);
+                setTimeout(() => {
+                    loadingDiv.classList.add('d-none');
+                    dropZone.classList.remove('d-none');
+                    startConvertDiv.classList.remove('d-none');
+                    renderConversionResult(finalData, true);
+                }, 350);
+            };
+
+            if (!initData.async) {
+                finalizeSuccess(initData);
+                return;
+            }
+
+            // Poll background conversion job until done === true
+            let pollTimer = setInterval(async () => {
+                try {
+                    const res = await fetch(`/api/upload-progress/${jobId}`);
+                    if (!res.ok) return;
+                    const info = await res.json();
+                    if (info && info.progress !== undefined) {
+                        const pct = Math.min(Math.max(info.progress, 12), info.done ? 100 : 98);
+                        progressBar.style.width = pct + '%';
+                        progressBadge.textContent = pct + '%';
+                        if (info.message) {
+                            progressStatusDetail.textContent = info.message;
+                            if (pct >= 90 && !info.done) {
+                                progressStageTitle.textContent = 'กำลังบันทึกและสร้างไฟล์ Excel...';
+                            } else if (pct >= 12 && !info.done) {
+                                progressStageTitle.textContent = 'กำลังประมวลผลและสกัดข้อมูลจาก PDF...';
+                            }
+                        }
+                    }
+                    if (info && info.done) {
+                        clearInterval(pollTimer);
+                        if (info.error) {
+                            loadingDiv.classList.add('d-none');
+                            dropZone.classList.remove('d-none');
+                            startConvertDiv.classList.remove('d-none');
+                            Swal.fire({
+                                icon: 'error',
+                                title: 'แปลงไฟล์ไม่สำเร็จ',
+                                text: info.error
+                            });
+                            return;
+                        }
+                        if (info.result) {
+                            finalizeSuccess(info.result);
+                        }
+                    }
+                } catch (err) {}
+            }, 450);
 
         } catch (err) {
-            clearInterval(pollTimer);
             loadingDiv.classList.add('d-none');
             dropZone.classList.remove('d-none');
             startConvertDiv.classList.remove('d-none');

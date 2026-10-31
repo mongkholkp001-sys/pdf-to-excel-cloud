@@ -1,5 +1,6 @@
 import os
 import uuid
+import threading
 from functools import wraps
 from datetime import datetime, timedelta
 from flask import (
@@ -410,11 +411,14 @@ def upload_pdf():
         
     doc_type = request.form.get('doc_type', 'uncertified').strip()
     job_id = request.form.get('job_id', '').strip()
+    async_mode = request.form.get('async_mode', '').strip() == '1'
     
     if doc_type not in ['uncertified', 'certified', 'land']:
         doc_type = 'uncertified'
 
-    user = database.get_user_by_id(session['user_id'])
+    user_id = session['user_id']
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    user = database.get_user_by_id(user_id)
     if doc_type == 'land' and not user_can_land(user):
         return jsonify({'success': False, 'error': 'บัญชีของคุณไม่มีสิทธิ์ใช้งานระบบแปลงไฟล์ข้อมูลที่ดิน กรุณาติดต่อผู้ดูแลระบบเพื่อขอเปิดสิทธิ์'}), 403
     if doc_type in ['uncertified', 'certified'] and not user_can_civil(user):
@@ -437,139 +441,150 @@ def upload_pdf():
         saved_pdf_paths.append(p_path)
 
     stored_pdf_name = os.path.basename(saved_pdf_paths[0])
-    pdf_path = saved_pdf_paths[0]
     if doc_type in ['uncertified', 'certified'] and user_can_land(user) and land_extractor.is_land_pdf(saved_pdf_paths):
         doc_type = 'land'
         type_label = "Land"
     
     if job_id:
         CONVERSION_PROGRESS[job_id] = {
-            'progress': 10,
+            'progress': 12,
             'message': 'บันทึกไฟล์เรียบร้อยแล้ว กำลังเริ่มการสกัดข้อมูล...',
             'done': False
         }
         
     gemini_key = (database.get_setting('gemini_api_key') or os.environ.get('GEMINI_API_KEY')) if doc_type != 'land' else None
     ai_lbl = " [Enterprise AI ⚡]" if gemini_key else ""
+    excel_name = f"Export_{type_label}_{unique_prefix}.xlsx"
+    excel_path = os.path.join(OUTPUT_FOLDER, excel_name)
+    merged_pdf_name = f"Merged_Sorted_Land_{unique_prefix}.pdf"
+    merged_pdf_path = os.path.join(OUTPUT_FOLDER, merged_pdf_name)
+    download_excel_url = url_for('download_file', filename=excel_name)
+    download_merged_url = url_for('download_file', filename=merged_pdf_name)
 
     def on_progress(current_page, total_pages):
         if job_id:
-            pct = 15 + int((current_page / max(total_pages, 1)) * 70)
+            pct = 15 + int((current_page / max(total_pages, 1)) * 72)
             CONVERSION_PROGRESS[job_id] = {
                 'progress': pct,
                 'message': f'กำลังอ่านและสกัดข้อมูลหน้าที่ {current_page}/{total_pages}{ai_lbl} ({pct}%)...',
                 'done': False
             }
-            
-    try:
-        excel_name = f"Export_{type_label}_{unique_prefix}.xlsx"
-        excel_path = os.path.join(OUTPUT_FOLDER, excel_name)
-        discrepancy_report = None
-        merged_pdf_url = None
 
-        if doc_type == 'land':
-            # Single-pass merge, sort, and 25-column extraction with real-time progress
-            merged_pdf_name = f"Merged_Sorted_Land_{unique_prefix}.pdf"
-            merged_pdf_path = os.path.join(OUTPUT_FOLDER, merged_pdf_name)
-            discrepancy_report, pages_meta = land_extractor.merge_and_sort_land_pdfs(
-                saved_pdf_paths, merged_pdf_path, progress_callback=on_progress, return_pages_meta=True
+    def _run_conversion():
+        try:
+            discrepancy_report = None
+            merged_pdf_url = None
+
+            if doc_type == 'land':
+                discrepancy_report, pages_meta = land_extractor.merge_and_sort_land_pdfs(
+                    saved_pdf_paths, merged_pdf_path, progress_callback=on_progress, return_pages_meta=True
+                )
+                merged_pdf_url = download_merged_url
+
+                records = land_extractor.extract_land_pdf_to_records(saved_pdf_paths, _preparsed_pages=pages_meta)
+                page_count = discrepancy_report.get('total_input_pages', len(records))
+                row_count = len(records)
+
+                if job_id:
+                    CONVERSION_PROGRESS[job_id] = {
+                        'progress': 90,
+                        'message': f'สกัดข้อมูลที่ดินสำเร็จ {row_count} แปลง กำลังสร้างไฟล์ Excel 25 คอลัมน์ (.xlsx)...',
+                        'done': False
+                    }
+                excel_exporter.export_land_records_to_excel(records, excel_path)
+            else:
+                records = []
+                for p_path in saved_pdf_paths:
+                    recs = extractor.extract_pdf_data(p_path, progress_callback=on_progress, doc_type=doc_type, api_key=gemini_key)
+                    for r in recs:
+                        r['no'] = len(records) + 1
+                        records.append(r)
+                page_count = len(records)
+                row_count = page_count
+
+                if job_id:
+                    CONVERSION_PROGRESS[job_id] = {
+                        'progress': 90,
+                        'message': f'สกัดข้อมูลสำเร็จ {page_count} หน้า กำลังสร้างไฟล์ Excel (.xlsx)...',
+                        'done': False
+                    }
+
+                excel_exporter.export_records_to_excel(records, excel_path)
+
+            if doc_type == 'land':
+                type_prefix_thai = "ข้อมูลที่ดิน"
+            elif doc_type == 'certified':
+                type_prefix_thai = "แบบรับรอง"
+            else:
+                type_prefix_thai = "แบบไม่รับรอง"
+
+            log_id = database.log_conversion(
+                user_id=user_id,
+                original_filename=f"[{type_prefix_thai}] {orig_name}",
+                stored_filename=stored_pdf_name,
+                page_count=page_count,
+                row_count=row_count,
+                excel_filename=excel_name,
+                status='success',
+                ip_address=client_ip
             )
-            merged_pdf_url = url_for('download_file', filename=merged_pdf_name)
 
-            records = land_extractor.extract_land_pdf_to_records(saved_pdf_paths, _preparsed_pages=pages_meta)
-            page_count = discrepancy_report.get('total_input_pages', len(records))
-            row_count = len(records)
+            if doc_type != 'land':
+                database.save_extracted_records(log_id, records)
 
-            if job_id:
-                CONVERSION_PROGRESS[job_id] = {
-                    'progress': 90,
-                    'message': f'สกัดข้อมูลที่ดินสำเร็จ {row_count} แปลง กำลังสร้างไฟล์ Excel 25 คอลัมน์ (.xlsx)...',
-                    'done': False
-                }
-            excel_exporter.export_land_records_to_excel(records, excel_path)
-        else:
-            # Extract data from PDF (multi-page supported)
-            records = []
-            for p_path in saved_pdf_paths:
-                recs = extractor.extract_pdf_data(p_path, progress_callback=on_progress, doc_type=doc_type, api_key=gemini_key)
-                for r in recs:
-                    r['no'] = len(records) + 1
-                    records.append(r)
-            page_count = len(records)
-            row_count = page_count
-            
-            if job_id:
-                CONVERSION_PROGRESS[job_id] = {
-                    'progress': 90,
-                    'message': f'สกัดข้อมูลสำเร็จ {page_count} หน้า กำลังสร้างไฟล์ Excel (.xlsx)...',
-                    'done': False
-                }
-                
-            excel_exporter.export_records_to_excel(records, excel_path)
-        
-        # Log to Database
-        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-        if doc_type == 'land':
-            type_prefix_thai = "ข้อมูลที่ดิน"
-        elif doc_type == 'certified':
-            type_prefix_thai = "แบบรับรอง"
-        else:
-            type_prefix_thai = "แบบไม่รับรอง"
-
-        log_id = database.log_conversion(
-            user_id=session['user_id'],
-            original_filename=f"[{type_prefix_thai}] {orig_name}",
-            stored_filename=stored_pdf_name,
-            page_count=page_count,
-            row_count=row_count,
-            excel_filename=excel_name,
-            status='success',
-            ip_address=client_ip
-        )
-        
-        # Save extracted records for fast view
-        if doc_type != 'land':
-            database.save_extracted_records(log_id, records)
-        
-        if job_id:
-            CONVERSION_PROGRESS[job_id] = {
-                'progress': 100,
-                'message': f'แปลงไฟล์สำเร็จ {row_count} รายการ เรียบร้อย 100%!',
-                'done': True
+            result_payload = {
+                'success': True,
+                'doc_type': doc_type,
+                'page_count': page_count,
+                'row_count': row_count,
+                'records': records,
+                'discrepancy_report': discrepancy_report,
+                'merged_pdf_url': merged_pdf_url,
+                'log_id': log_id,
+                'download_url': download_excel_url
             }
-            
+
+            if job_id:
+                CONVERSION_PROGRESS[job_id] = {
+                    'progress': 100,
+                    'message': f'แปลงไฟล์สำเร็จ {row_count} รายการ เรียบร้อย 100%!',
+                    'done': True,
+                    'result': result_payload
+                }
+            return result_payload, 200
+
+        except Exception as e:
+            if job_id:
+                CONVERSION_PROGRESS[job_id] = {
+                    'progress': 100,
+                    'message': f'เกิดข้อผิดพลาด: {str(e)}',
+                    'error': str(e),
+                    'done': True
+                }
+            database.log_conversion(
+                user_id=user_id,
+                original_filename=orig_name,
+                stored_filename=stored_pdf_name,
+                page_count=0,
+                row_count=0,
+                excel_filename='',
+                status='failed',
+                ip_address=client_ip
+            )
+            return {'success': False, 'error': f'เกิดข้อผิดพลาดในการแปลงไฟล์: {str(e)}'}, 500
+
+    if async_mode and job_id:
+        t = threading.Thread(target=_run_conversion, daemon=True)
+        t.start()
         return jsonify({
             'success': True,
-            'doc_type': doc_type,
-            'page_count': page_count,
-            'row_count': row_count,
-            'records': records,
-            'discrepancy_report': discrepancy_report,
-            'merged_pdf_url': merged_pdf_url,
-            'log_id': log_id,
-            'download_url': url_for('download_file', filename=excel_name)
+            'async': True,
+            'job_id': job_id,
+            'message': 'เริ่มประมวลผลไฟล์ในเบื้องหลังแล้ว'
         })
-        
-    except Exception as e:
-        if job_id:
-            CONVERSION_PROGRESS[job_id] = {
-                'progress': 100,
-                'message': f'เกิดข้อผิดพลาด: {str(e)}',
-                'error': str(e),
-                'done': True
-            }
-        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-        database.log_conversion(
-            user_id=session['user_id'],
-            original_filename=orig_name,
-            stored_filename=stored_pdf_name,
-            page_count=0,
-            row_count=0,
-            excel_filename='',
-            status='failed',
-            ip_address=client_ip
-        )
-        return jsonify({'success': False, 'error': f'เกิดข้อผิดพลาดในการแปลงไฟล์: {str(e)}'}), 500
+
+    payload, status_code = _run_conversion()
+    return jsonify(payload), status_code
 
 @app.route('/download/<filename>')
 @login_required
