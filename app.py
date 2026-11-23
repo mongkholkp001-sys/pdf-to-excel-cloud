@@ -84,17 +84,21 @@ def inject_user():
     pending_count = 0
     can_civil = False
     can_land = False
-    if 'user_id' in session:
-        user = database.get_user_by_id(session['user_id'])
-        if user:
-            can_civil = user_can_civil(user)
-            can_land = user_can_land(user)
-        if session.get('role') == 'admin':
-            try:
-                pending_count = len(database.get_pending_users())
-            except Exception:
-                pending_count = 0
-    gemini_key = database.get_setting('gemini_api_key') or os.environ.get('GEMINI_API_KEY')
+    gemini_key = os.environ.get('GEMINI_API_KEY')
+    try:
+        if 'user_id' in session:
+            user = database.get_user_by_id(session['user_id'])
+            if user:
+                can_civil = user_can_civil(user)
+                can_land = user_can_land(user)
+            if session.get('role') == 'admin':
+                try:
+                    pending_count = len(database.get_pending_users())
+                except Exception:
+                    pending_count = 0
+        gemini_key = database.get_setting('gemini_api_key') or gemini_key
+    except Exception as e:
+        print(f"[Context Processor Warning] {e}")
     gemini_active = bool(gemini_key)
     return dict(
         current_user=user,

@@ -66,6 +66,11 @@ class _PgConnCompat:
         if self._closed:
             return
         self._closed = True
+        try:
+            if not self._conn.closed:
+                self._conn.rollback()
+        except Exception:
+            pass
         if self._pool is not None:
             try:
                 self._pool.putconn(self._conn)
@@ -85,32 +90,9 @@ PLANS = {
     'lifetime':  {'name': 'ซื้อขาด (สิทธิ์ตลอดชีพ)', 'price': 0, 'days': None},
 }
 
-def get_db():
-    global _PG_CONN_POOL
-    if USE_POSTGRES:
-        url = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
-        try:
-            if _PG_CONN_POOL is None:
-                _PG_CONN_POOL = pg_pool.ThreadedConnectionPool(1, 10, dsn=url, connect_timeout=10)
-            conn = _PG_CONN_POOL.getconn()
-            if conn.closed:
-                _PG_CONN_POOL.putconn(conn, close=True)
-                conn = psycopg2.connect(url, connect_timeout=10)
-                return _PgConnCompat(conn, None)
-            # Fast ping to ensure connection wasn't dropped by server idle timeout
-            try:
-                with conn.cursor() as c:
-                    c.execute("SELECT 1")
-            except Exception:
-                try:
-                    _PG_CONN_POOL.putconn(conn, close=True)
-                except Exception:
-                    pass
-                conn = psycopg2.connect(url, connect_timeout=10)
-                return _PgConnCompat(conn, None)
-            return _PgConnCompat(conn, _PG_CONN_POOL)
-        except Exception:
-            return _PgConnCompat(psycopg2.connect(url, connect_timeout=10), None)
+_SQLITE_INITIALIZED = False
+
+def _open_sqlite_conn():
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.execute('PRAGMA journal_mode=WAL;')
     conn.execute('PRAGMA busy_timeout=10000;')
@@ -118,12 +100,59 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
-def init_db():
-    conn = get_db()
+def get_db():
+    global _PG_CONN_POOL, USE_POSTGRES, _SQLITE_INITIALIZED
+    if USE_POSTGRES:
+        url = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+        try:
+            if _PG_CONN_POOL is None:
+                _PG_CONN_POOL = pg_pool.ThreadedConnectionPool(1, 15, dsn=url, connect_timeout=4)
+            try:
+                conn = _PG_CONN_POOL.getconn()
+            except Exception:
+                conn = psycopg2.connect(url, connect_timeout=4)
+                return _PgConnCompat(conn, None)
+            if conn.closed:
+                try:
+                    _PG_CONN_POOL.putconn(conn, close=True)
+                except Exception:
+                    pass
+                conn = psycopg2.connect(url, connect_timeout=4)
+                return _PgConnCompat(conn, None)
+            try:
+                conn.rollback()
+                with conn.cursor() as c:
+                    c.execute("SELECT 1")
+                conn.rollback()
+            except Exception:
+                try:
+                    _PG_CONN_POOL.putconn(conn, close=True)
+                except Exception:
+                    pass
+                conn = psycopg2.connect(url, connect_timeout=4)
+                return _PgConnCompat(conn, None)
+            return _PgConnCompat(conn, _PG_CONN_POOL)
+        except Exception as pg_err:
+            try:
+                conn = psycopg2.connect(url, connect_timeout=4)
+                return _PgConnCompat(conn, None)
+            except Exception as fallback_err:
+                print(f"[Database Fallback] PostgreSQL unreachable ({fallback_err}); switching to local SQLite ({DB_PATH}).")
+                USE_POSTGRES = False
+    conn = _open_sqlite_conn()
+    if not _SQLITE_INITIALIZED:
+        _SQLITE_INITIALIZED = True
+        try:
+            _init_schema_on_conn(conn, is_postgres=False)
+        except Exception as init_err:
+            print(f"[Database Fallback] SQLite init error: {init_err}")
+    return conn
+
+def _init_schema_on_conn(conn, is_postgres=False):
     cursor = conn.cursor()
 
-    id_def = 'BIGSERIAL PRIMARY KEY' if USE_POSTGRES else 'INTEGER PRIMARY KEY AUTOINCREMENT'
-    bool_def = 'BOOLEAN DEFAULT TRUE' if USE_POSTGRES else 'INTEGER DEFAULT 1'
+    id_def = 'BIGSERIAL PRIMARY KEY' if is_postgres else 'INTEGER PRIMARY KEY AUTOINCREMENT'
+    bool_def = 'BOOLEAN DEFAULT TRUE' if is_postgres else 'INTEGER DEFAULT 1'
 
     cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS users (
@@ -137,7 +166,7 @@ def init_db():
     """)
 
     # Safe schema migration for allow_civil and allow_land on existing databases
-    if USE_POSTGRES:
+    if is_postgres:
         cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS allow_civil INTEGER NOT NULL DEFAULT 1")
         cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS allow_land INTEGER NOT NULL DEFAULT 1")
     else:
@@ -193,7 +222,13 @@ def init_db():
         print('Initial admin user created.')
 
     conn.commit()
-    conn.close()
+
+def init_db():
+    conn = get_db()
+    try:
+        _init_schema_on_conn(conn, is_postgres=USE_POSTGRES)
+    finally:
+        conn.close()
 
 # User Management Functions
 def authenticate_user(username, password):
