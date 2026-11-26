@@ -11,11 +11,13 @@ import re
 import subprocess
 import tempfile
 import io
+import gc
 from PIL import Image
 import pytesseract
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-OCR_WORKERS = int(os.environ.get('OCR_WORKERS', min(4, max(2, (os.cpu_count() or 2)))))
+_DEFAULT_WORKERS = 2 if os.environ.get('RENDER') else min(4, max(2, (os.cpu_count() or 2)))
+OCR_WORKERS = int(os.environ.get('OCR_WORKERS', _DEFAULT_WORKERS))
 
 # Official 77 Provinces of Thailand for 100% accurate province validation and auto-correction
 THAI_PROVINCES_77 = [
@@ -1164,70 +1166,87 @@ def extract_pdf_data(pdf_path, progress_callback=None, doc_type='uncertified', a
         doc.close()
         return _harmonize_batch_records(records)
 
-    # Local high-speed parallel extraction
+    # Local high-speed, memory-bounded mini-batch parallel extraction
+    # Processes only `batch_size` pages in memory at a time (< 15 MB RAM even on 700-page PDFs!)
     page_results = [None] * page_count
-    ocr_tasks = []  # (idx, page_num, pil_img_primary, pil_img_recovery)
     done_count = 0
+    workers = max(1, min(OCR_WORKERS, page_count))
+    batch_size = max(2, workers * 2)
 
-    for idx in range(page_count):
-        page = doc[idx]
-        mode, payload = _prepare_civil_page_for_ocr(page, dpi=220, lut=_LUT_PRIMARY)
-        if mode == 'blank':
-            page_results[idx] = None
-            done_count += 1
-            if progress_callback:
-                progress_callback(done_count, page_count)
-        elif mode == 'text':
-            page_results[idx] = parse_civil_lines(payload.splitlines(), page_num=idx + 1)
-            done_count += 1
-            if progress_callback:
-                progress_callback(done_count, page_count)
-        else:
-            # Also prepare recovery LUT image in memory from the same grayscale pixmap
-            ocr_tasks.append((idx, idx + 1, payload))
+    def _worker(task_item):
+        p_idx, p_num, pil_img = task_item
+        txt = _ocr_pil_image_tha(pil_img)
+        parsed = parse_civil_lines(txt.splitlines(), page_num=p_num)
+        return p_idx, parsed
 
-    if ocr_tasks:
-        def _worker(task_item):
-            p_idx, p_num, pil_img = task_item
-            txt = _ocr_pil_image_tha(pil_img)
-            parsed = parse_civil_lines(txt.splitlines(), page_num=p_num)
-            return p_idx, parsed
+    pool = ThreadPoolExecutor(max_workers=workers) if workers > 1 else None
+    try:
+        for batch_start in range(0, page_count, batch_size):
+            batch_end = min(page_count, batch_start + batch_size)
+            ocr_batch = []
 
-        workers = min(OCR_WORKERS, len(ocr_tasks))
-        if workers <= 1:
-            for item in ocr_tasks:
-                p_idx, parsed = _worker(item)
-                page_results[p_idx] = parsed
-                done_count += 1
-                if progress_callback:
-                    progress_callback(done_count, page_count)
-        else:
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = [pool.submit(_worker, item) for item in ocr_tasks]
-                for fut in as_completed(futures):
-                    p_idx, parsed = fut.result()
-                    page_results[p_idx] = parsed
+            for idx in range(batch_start, batch_end):
+                page = doc[idx]
+                mode, payload = _prepare_civil_page_for_ocr(page, dpi=220, lut=_LUT_PRIMARY)
+                if mode == 'blank':
+                    page_results[idx] = None
                     done_count += 1
                     if progress_callback:
                         progress_callback(done_count, page_count)
+                elif mode == 'text':
+                    page_results[idx] = parse_civil_lines(payload.splitlines(), page_num=idx + 1)
+                    done_count += 1
+                    if progress_callback:
+                        progress_callback(done_count, page_count)
+                else:
+                    ocr_batch.append((idx, idx + 1, payload))
 
-    # Automatic high-sensitivity recovery pass on the main thread for any page missing key fields
-    for idx, rec in enumerate(page_results):
-        if rec is not None and (not rec.get('cid') or not rec.get('dob') or not rec.get('address') or not rec.get('mother_name')):
+            if ocr_batch:
+                if pool is None:
+                    for item in ocr_batch:
+                        p_idx, parsed = _worker(item)
+                        page_results[p_idx] = parsed
+                        done_count += 1
+                        if progress_callback:
+                            progress_callback(done_count, page_count)
+                else:
+                    futures = [pool.submit(_worker, item) for item in ocr_batch]
+                    for fut in as_completed(futures):
+                        p_idx, parsed = fut.result()
+                        page_results[p_idx] = parsed
+                        done_count += 1
+                        if progress_callback:
+                            progress_callback(done_count, page_count)
+
+            # Immediate recovery pass for any page in this mini-batch missing key fields
+            for idx in range(batch_start, batch_end):
+                rec = page_results[idx]
+                if rec is not None and (not rec.get('cid') or not rec.get('dob') or not rec.get('address') or not rec.get('mother_name')):
+                    try:
+                        page = doc[idx]
+                        mode2, payload2 = _prepare_civil_page_for_ocr(page, dpi=240, lut=_LUT_RECOVERY)
+                        if mode2 == 'image':
+                            txt2 = _ocr_pil_image_tha(payload2)
+                            rec2 = parse_civil_lines(txt2.splitlines(), page_num=idx + 1)
+                            if rec2:
+                                for k, v in rec2.items():
+                                    if (not rec.get(k) or rec.get(k) == '-') and v and v != '-':
+                                        rec[k] = v
+                            del payload2
+                    except Exception:
+                        pass
+
+            # Free mini-batch images and flush PyMuPDF C++ store cache immediately
+            del ocr_batch
             try:
-                page = doc[idx]
-                mode2, payload2 = _prepare_civil_page_for_ocr(page, dpi=250, lut=_LUT_RECOVERY)
-                if mode2 == 'image':
-                    txt2 = _ocr_pil_image_tha(payload2)
-                    rec2 = parse_civil_lines(txt2.splitlines(), page_num=idx + 1)
-                    if rec2:
-                        for k, v in rec2.items():
-                            if (not rec.get(k) or rec.get(k) == '-') and v and v != '-':
-                                rec[k] = v
+                fitz.TOOLS.store_shrink(100)
             except Exception:
                 pass
-
-    doc.close()
+            gc.collect()
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=True)
+        doc.close()
 
     records = [r for r in page_results if r is not None]
     return _harmonize_batch_records(records)

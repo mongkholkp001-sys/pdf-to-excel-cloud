@@ -1,6 +1,10 @@
 import os
+import re
 import uuid
+import json
+import time
 import threading
+import fitz
 from functools import wraps
 from datetime import datetime, timedelta
 from flask import (
@@ -397,13 +401,51 @@ def history():
 
 CONVERSION_PROGRESS = {}
 
+def _job_file_path(job_id):
+    safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '', str(job_id or ''))
+    return os.path.join(OUTPUT_FOLDER, f"job_{safe_id}.json") if safe_id else None
+
+def _set_job_progress(job_id, info):
+    if not job_id:
+        return
+    CONVERSION_PROGRESS[job_id] = info
+    jpath = _job_file_path(job_id)
+    if jpath:
+        try:
+            with open(jpath, 'w', encoding='utf-8') as jf:
+                json.dump(info, jf, ensure_ascii=False)
+        except Exception:
+            pass
+
 @app.route('/api/upload-progress/<job_id>')
 def upload_progress(job_id):
-    info = CONVERSION_PROGRESS.get(job_id, {
-        'progress': 0,
-        'message': 'กำลังเตรียมการประมวลผล...',
-        'done': False
-    })
+    info = CONVERSION_PROGRESS.get(job_id)
+    if not info:
+        jpath = _job_file_path(job_id)
+        if jpath and os.path.exists(jpath):
+            try:
+                with open(jpath, 'r', encoding='utf-8') as jf:
+                    info = json.load(jf)
+                    CONVERSION_PROGRESS[job_id] = info
+            except Exception:
+                info = None
+    if not info:
+        # Check if job_id timestamp is older than 20 seconds (meaning server restarted mid-job)
+        m_ts = str(job_id or '').split('_')
+        if len(m_ts) >= 2 and m_ts[1].isdigit():
+            age_ms = int(time.time() * 1000) - int(m_ts[1])
+            if age_ms > 20000:
+                return jsonify({
+                    'progress': 100,
+                    'message': 'เซิร์ฟเวอร์รีสตาร์ทระหว่างประมวลผล กรุณากดแปลงไฟล์ใหม่อีกครั้ง',
+                    'error': 'เซิร์ฟเวอร์ออนไลน์รีสตาร์ทระหว่างประมวลผล (หากมีไฟล์หลายร้อยหน้า แนะนำให้แบ่งอัปโหลดครั้งละไม่เกิน 80-100 หน้าบนเซิร์ฟเวอร์ฟรี หรือรันผ่านเซิร์ฟเวอร์ในเครื่อง 127.0.0.1:5055)',
+                    'done': True
+                })
+        info = {
+            'progress': 12,
+            'message': 'กำลังเตรียมการประมวลผล...',
+            'done': False
+        }
     return jsonify(info)
 
 @app.route('/api/upload', methods=['POST'])
@@ -450,11 +492,11 @@ def upload_pdf():
         type_label = "Land"
     
     if job_id:
-        CONVERSION_PROGRESS[job_id] = {
-            'progress': 12,
+        _set_job_progress(job_id, {
+            'progress': 14,
             'message': 'บันทึกไฟล์เรียบร้อยแล้ว กำลังเริ่มการสกัดข้อมูล...',
             'done': False
-        }
+        })
         
     gemini_key = (database.get_setting('gemini_api_key') or os.environ.get('GEMINI_API_KEY')) if doc_type != 'land' else None
     ai_lbl = " [Enterprise AI ⚡]" if gemini_key else ""
@@ -468,11 +510,11 @@ def upload_pdf():
     def on_progress(current_page, total_pages):
         if job_id:
             pct = 15 + int((current_page / max(total_pages, 1)) * 72)
-            CONVERSION_PROGRESS[job_id] = {
+            _set_job_progress(job_id, {
                 'progress': pct,
                 'message': f'กำลังอ่านและสกัดข้อมูลหน้าที่ {current_page}/{total_pages}{ai_lbl} ({pct}%)...',
                 'done': False
-            }
+            })
 
     def _run_conversion():
         try:
@@ -490,28 +532,53 @@ def upload_pdf():
                 row_count = len(records)
 
                 if job_id:
-                    CONVERSION_PROGRESS[job_id] = {
+                    _set_job_progress(job_id, {
                         'progress': 90,
                         'message': f'สกัดข้อมูลที่ดินสำเร็จ {row_count} แปลง กำลังสร้างไฟล์ Excel 25 คอลัมน์ (.xlsx)...',
                         'done': False
-                    }
+                    })
                 excel_exporter.export_land_records_to_excel(records, excel_path)
             else:
-                records = []
+                # Count total pages across all uploaded PDF files for smooth global progress 1..N
+                file_page_counts = []
                 for p_path in saved_pdf_paths:
-                    recs = extractor.extract_pdf_data(p_path, progress_callback=on_progress, doc_type=doc_type, api_key=gemini_key)
+                    try:
+                        d_tmp = fitz.open(p_path)
+                        file_page_counts.append(len(d_tmp))
+                        d_tmp.close()
+                    except Exception:
+                        file_page_counts.append(1)
+                total_pages_all = max(sum(file_page_counts), 1)
+                pages_done_before = 0
+
+                if job_id:
+                    _set_job_progress(job_id, {
+                        'progress': 15,
+                        'message': f'กำลังเริ่มสกัดข้อมูลหน้าแรก (ทั้งหมด {total_pages_all} หน้าจาก {len(saved_pdf_paths)} ไฟล์)...',
+                        'done': False
+                    })
+
+                records = []
+                for f_idx, p_path in enumerate(saved_pdf_paths):
+                    base_done = pages_done_before
+                    def _file_progress(cur_p, tot_p, _base=base_done):
+                        on_progress(_base + cur_p, total_pages_all)
+
+                    recs = extractor.extract_pdf_data(p_path, progress_callback=_file_progress, doc_type=doc_type, api_key=gemini_key)
+                    pages_done_before += file_page_counts[f_idx]
                     for r in recs:
-                        r['no'] = len(records) + 1
                         records.append(r)
+
+                records = extractor._harmonize_batch_records(records)
                 page_count = len(records)
                 row_count = page_count
 
                 if job_id:
-                    CONVERSION_PROGRESS[job_id] = {
+                    _set_job_progress(job_id, {
                         'progress': 90,
-                        'message': f'สกัดข้อมูลสำเร็จ {page_count} หน้า กำลังสร้างไฟล์ Excel (.xlsx)...',
+                        'message': f'สกัดข้อมูลสำเร็จ {page_count} รายการ กำลังสร้างไฟล์ Excel (.xlsx)...',
                         'done': False
-                    }
+                    })
 
                 excel_exporter.export_records_to_excel(records, excel_path)
 
@@ -549,22 +616,22 @@ def upload_pdf():
             }
 
             if job_id:
-                CONVERSION_PROGRESS[job_id] = {
+                _set_job_progress(job_id, {
                     'progress': 100,
                     'message': f'แปลงไฟล์สำเร็จ {row_count} รายการ เรียบร้อย 100%!',
                     'done': True,
                     'result': result_payload
-                }
+                })
             return result_payload, 200
 
         except Exception as e:
             if job_id:
-                CONVERSION_PROGRESS[job_id] = {
+                _set_job_progress(job_id, {
                     'progress': 100,
                     'message': f'เกิดข้อผิดพลาด: {str(e)}',
                     'error': str(e),
                     'done': True
-                }
+                })
             database.log_conversion(
                 user_id=user_id,
                 original_filename=orig_name,
